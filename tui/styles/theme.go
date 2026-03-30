@@ -1,0 +1,52 @@
+package styles
+
+import "github.com/charmbracelet/lipgloss"
+
+var (
+	COLOR_PRIMARY   = lipgloss.Color("#8B6542")
+	COLOR_SUCCESS   = lipgloss.Color("#7C9A6B")
+	COLOR_MUTED     = lipgloss.Color("#E8DCC8")
+	COLOR_ERROR     = lipgloss.Color("#C0392B")
+	COLOR_HIGHLIGHT = lipgloss.Color("#A0785A")
+)
+
+var (
+	TitleStyle = lipgloss.NewStyle().
+			Foreground(COLOR_PRIMARY).
+			Bold(true)
+
+	SubtitleStyle = lipgloss.NewStyle().
+			Foreground(COLOR_HIGHLIGHT)
+
+	MutedStyle = lipgloss.NewStyle().
+			Foreground(COLOR_MUTED)
+
+	SuccessStyle = lipgloss.NewStyle().
+			Foreground(COLOR_SUCCESS)
+
+	ErrorStyle = lipgloss.NewStyle().
+			Foreground(COLOR_ERROR)
+
+	SelectedStyle = lipgloss.NewStyle().
+			Foreground(COLOR_SUCCESS).
+			Bold(true)
+)
+
+var (
+	BorderStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(COLOR_MUTED)
+
+	ActiveBorderStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(COLOR_PRIMARY)
+)
+
+var (
+	PaddedStyle = lipgloss.NewStyle().
+			Padding(1, 2)
+
+	HintBarStyle = lipgloss.NewStyle().
+			Foreground(COLOR_MUTED).
+			Padding(0, 1)
+)
