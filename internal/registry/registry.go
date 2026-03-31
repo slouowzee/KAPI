@@ -18,6 +18,7 @@ type Framework struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Ecosystem        string   `json:"ecosystem"`
+	Type             string   `json:"type,omitempty"` // "framework" or "library"
 	Description      string   `json:"description"`
 	Tags             []string `json:"tags"`
 	NpmPackage       string   `json:"npm_package,omitempty"`
