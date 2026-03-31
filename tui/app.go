@@ -11,6 +11,7 @@ const (
 	SCREEN_WELCOME Screen = iota
 	SCREEN_FOLDER
 	SCREEN_ECOSYSTEM
+	SCREEN_FRAMEWORK
 )
 
 type App struct {
@@ -20,9 +21,10 @@ type App struct {
 	welcome   screens.WelcomeModel
 	folder    screens.FolderModel
 	ecosystem screens.EcosystemModel
+	framework screens.FrameworkModel
 
-	// selectedDir carries the folder choice between screens
-	selectedDir string
+	selectedDir       string
+	selectedEcosystem int
 }
 
 func New() App {
@@ -37,7 +39,6 @@ func (a App) Init() tea.Cmd {
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle global resize and quit before delegating to screen models
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
@@ -56,9 +57,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return a, tea.Quit
 		case "q":
-			// Don't intercept q when the folder screen is in input mode —
-			// the user may want to type the letter q as part of a path.
 			if a.screen == SCREEN_FOLDER && a.folder.IsInputMode() {
+				break
+			}
+			if a.screen == SCREEN_FRAMEWORK {
 				break
 			}
 			return a, tea.Quit
@@ -115,7 +117,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if updated.Done() {
 			a.ecosystem.ConsumeDone()
-			// TODO: transition to framework selection screen
+			a.selectedEcosystem = updated.SelectedEcosystem()
+			a.screen = SCREEN_FRAMEWORK
+			a.framework = screens.NewFramework(a.width, a.height, a.selectedEcosystem, a.selectedDir)
+			return a, a.framework.Init()
+		}
+		return a, cmd
+
+	case SCREEN_FRAMEWORK:
+		updated, cmd := a.framework.Update(msg)
+		a.framework = updated
+
+		if updated.IsBack() {
+			a.framework.ConsumeBack()
+			a.screen = SCREEN_ECOSYSTEM
+			return a, nil
+		}
+		if updated.Done() {
+			a.framework.ConsumeDone()
+			// TODO: transition to packages screen
 		}
 		return a, cmd
 	}
@@ -131,6 +151,8 @@ func (a App) View() string {
 		return a.folder.View()
 	case SCREEN_ECOSYSTEM:
 		return a.ecosystem.View()
+	case SCREEN_FRAMEWORK:
+		return a.framework.View()
 	}
 	return ""
 }

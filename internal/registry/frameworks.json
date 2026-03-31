@@ -1,0 +1,211 @@
+{
+  "frameworks": [
+    {
+      "id": "laravel",
+      "name": "Laravel",
+      "ecosystem": "php",
+      "description": "The PHP framework for web artisans",
+      "tags": ["full-stack", "mvc", "orm", "queue", "artisan"],
+      "packagist_package": "laravel/laravel",
+      "github_repo": "laravel/laravel"
+    },
+    {
+      "id": "symfony",
+      "name": "Symfony",
+      "ecosystem": "php",
+      "description": "High performance PHP framework for web applications",
+      "tags": ["full-stack", "mvc", "components", "enterprise"],
+      "packagist_package": "symfony/symfony",
+      "github_repo": "symfony/symfony"
+    },
+    {
+      "id": "slim",
+      "name": "Slim",
+      "ecosystem": "php",
+      "description": "Micro framework for simple yet powerful web applications and APIs",
+      "tags": ["micro", "api", "rest", "lightweight"],
+      "packagist_package": "slim/slim",
+      "github_repo": "slimphp/Slim"
+    },
+    {
+      "id": "lumen",
+      "name": "Lumen",
+      "ecosystem": "php",
+      "description": "The stunningly fast micro-framework by Laravel",
+      "tags": ["micro", "api", "rest", "laravel"],
+      "packagist_package": "laravel/lumen",
+      "github_repo": "laravel/lumen"
+    },
+    {
+      "id": "codeigniter",
+      "name": "CodeIgniter",
+      "ecosystem": "php",
+      "description": "Powerful PHP framework with a very small footprint",
+      "tags": ["mvc", "lightweight", "beginner-friendly"],
+      "packagist_package": "codeigniter4/framework",
+      "github_repo": "codeigniter4/CodeIgniter4"
+    },
+    {
+      "id": "yii",
+      "name": "Yii",
+      "ecosystem": "php",
+      "description": "Fast, secure and efficient PHP framework",
+      "tags": ["mvc", "enterprise", "gii", "performance"],
+      "packagist_package": "yiisoft/yii2",
+      "github_repo": "yiisoft/yii2"
+    },
+    {
+      "id": "wordpress",
+      "name": "WordPress",
+      "ecosystem": "php",
+      "description": "The world's most popular CMS and blogging platform",
+      "tags": ["cms", "blog", "plugins", "themes"],
+      "packagist_package": "johnpbloch/wordpress",
+      "github_repo": "WordPress/WordPress"
+    },
+    {
+      "id": "drupal",
+      "name": "Drupal",
+      "ecosystem": "php",
+      "description": "Open source CMS for ambitious digital experiences",
+      "tags": ["cms", "enterprise", "modules"],
+      "packagist_package": "drupal/core",
+      "github_repo": "drupal/drupal"
+    },
+    {
+      "id": "nextjs",
+      "name": "Next.js",
+      "ecosystem": "js",
+      "description": "The React framework for production — SSR, SSG and more",
+      "tags": ["react", "ssr", "ssg", "full-stack", "vercel"],
+      "npm_package": "next",
+      "github_repo": "vercel/next.js"
+    },
+    {
+      "id": "nuxt",
+      "name": "Nuxt",
+      "ecosystem": "js",
+      "description": "The intuitive Vue framework",
+      "tags": ["vue", "ssr", "ssg", "full-stack"],
+      "npm_package": "nuxt",
+      "github_repo": "nuxt/nuxt"
+    },
+    {
+      "id": "remix",
+      "name": "Remix",
+      "ecosystem": "js",
+      "description": "Full stack web framework focused on web standards and UX",
+      "tags": ["react", "full-stack", "ssr", "web-standards"],
+      "npm_package": "@remix-run/react",
+      "github_repo": "remix-run/remix"
+    },
+    {
+      "id": "tanstack-start",
+      "name": "TanStack Start",
+      "ecosystem": "js",
+      "description": "Full-stack React framework powered by TanStack Router",
+      "tags": ["react", "full-stack", "ssr", "tanstack"],
+      "npm_package": "@tanstack/react-start",
+      "github_repo": "TanStack/router"
+    },
+    {
+      "id": "astro",
+      "name": "Astro",
+      "ecosystem": "js",
+      "description": "Build faster websites with less client-side JavaScript",
+      "tags": ["static", "ssg", "islands", "multi-framework"],
+      "npm_package": "astro",
+      "github_repo": "withastro/astro"
+    },
+    {
+      "id": "gatsby",
+      "name": "Gatsby",
+      "ecosystem": "js",
+      "description": "The fastest frontend for the headless web",
+      "tags": ["react", "static", "ssg", "graphql"],
+      "npm_package": "gatsby",
+      "github_repo": "gatsbyjs/gatsby"
+    },
+    {
+      "id": "sveltekit",
+      "name": "SvelteKit",
+      "ecosystem": "js",
+      "description": "The fastest way to build Svelte apps",
+      "tags": ["svelte", "ssr", "ssg", "full-stack"],
+      "npm_package": "@sveltejs/kit",
+      "github_repo": "sveltejs/kit"
+    },
+    {
+      "id": "analog",
+      "name": "Analog",
+      "ecosystem": "js",
+      "description": "The fullstack Angular meta-framework",
+      "tags": ["angular", "ssr", "ssg", "full-stack"],
+      "npm_package": "@analogjs/platform",
+      "github_repo": "analogjs/analog"
+    },
+    {
+      "id": "vite",
+      "name": "Vite",
+      "ecosystem": "js",
+      "description": "Next generation frontend tooling",
+      "tags": ["bundler", "spa", "dev-server", "fast"],
+      "npm_package": "vite",
+      "github_repo": "vitejs/vite"
+    },
+    {
+      "id": "express",
+      "name": "Express",
+      "ecosystem": "js",
+      "description": "Fast, unopinionated, minimalist web framework for Node.js",
+      "tags": ["node", "api", "rest", "micro", "backend"],
+      "npm_package": "express",
+      "github_repo": "expressjs/express"
+    },
+    {
+      "id": "fastify",
+      "name": "Fastify",
+      "ecosystem": "js",
+      "description": "Fast and low overhead web framework for Node.js",
+      "tags": ["node", "api", "rest", "backend", "performance"],
+      "npm_package": "fastify",
+      "github_repo": "fastify/fastify"
+    },
+    {
+      "id": "nestjs",
+      "name": "NestJS",
+      "ecosystem": "js",
+      "description": "A progressive Node.js framework for scalable server-side applications",
+      "tags": ["node", "backend", "typescript", "enterprise", "decorators"],
+      "npm_package": "@nestjs/core",
+      "github_repo": "nestjs/nest"
+    },
+    {
+      "id": "hono",
+      "name": "Hono",
+      "ecosystem": "js",
+      "description": "Ultrafast web framework for the Edges",
+      "tags": ["edge", "api", "rest", "bun", "deno", "cloudflare"],
+      "npm_package": "hono",
+      "github_repo": "honojs/hono"
+    },
+    {
+      "id": "react-native",
+      "name": "React Native",
+      "ecosystem": "js",
+      "description": "Build native mobile apps using React",
+      "tags": ["mobile", "ios", "android", "react", "native"],
+      "npm_package": "react-native",
+      "github_repo": "facebook/react-native"
+    },
+    {
+      "id": "expo",
+      "name": "Expo",
+      "ecosystem": "js",
+      "description": "An open-source platform for making universal native apps with React",
+      "tags": ["mobile", "ios", "android", "react-native", "universal"],
+      "npm_package": "expo",
+      "github_repo": "expo/expo"
+    }
+  ]
+}
