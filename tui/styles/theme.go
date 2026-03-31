@@ -6,8 +6,10 @@ var (
 	COLOR_PRIMARY   = lipgloss.Color("#8B6542")
 	COLOR_SUCCESS   = lipgloss.Color("#7C9A6B")
 	COLOR_MUTED     = lipgloss.Color("#E8DCC8")
+	COLOR_DIM       = lipgloss.Color("#6B6B6B")
 	COLOR_ERROR     = lipgloss.Color("#C0392B")
 	COLOR_HIGHLIGHT = lipgloss.Color("#A0785A")
+	COLOR_LINK      = lipgloss.Color("#5B9BD5")
 )
 
 var (
@@ -30,6 +32,13 @@ var (
 	SelectedStyle = lipgloss.NewStyle().
 			Foreground(COLOR_SUCCESS).
 			Bold(true)
+
+	DimStyle = lipgloss.NewStyle().
+			Foreground(COLOR_DIM)
+
+	LinkStyle = lipgloss.NewStyle().
+			Foreground(COLOR_LINK).
+			Underline(true)
 )
 
 var (
@@ -38,8 +47,8 @@ var (
 			BorderForeground(COLOR_MUTED)
 
 	ActiveBorderStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(COLOR_PRIMARY)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(COLOR_PRIMARY)
 )
 
 var (
