@@ -33,8 +33,6 @@ const (
 	MENU_UPDATE
 )
 
-const MAX_PATH_LEN = 50
-
 var LOGO_GRADIENT = []lipgloss.Color{
 	"#8B6542",
 	"#8A7856",
@@ -61,6 +59,11 @@ type WelcomeModel struct {
 	cursor      int
 	menuItems   []menuItem
 
+	// enterPressed is a one-shot flag set when the user presses enter.
+	// The parent app reads it, acts on it, then resets the model — this avoids
+	// re-triggering transitions on every subsequent message.
+	enterPressed bool
+
 	workDir   string
 	ecosystem ecosystem.Ecosystem
 }
@@ -81,14 +84,6 @@ func buildMenuItems(eco ecosystem.Ecosystem, updateAvailable bool, latestVersion
 		items = append(items, menuItem{label: fmt.Sprintf("Update to %s", latestVersion), action: MENU_UPDATE})
 	}
 	return items
-}
-
-func truncatePath(path string) string {
-	runes := []rune(path)
-	if len(runes) <= MAX_PATH_LEN {
-		return path
-	}
-	return "…" + string(runes[len(runes)-MAX_PATH_LEN+1:])
 }
 
 func NewWelcome(width, height int) WelcomeModel {
@@ -207,7 +202,8 @@ func (m WelcomeModel) Update(msg tea.Msg) (WelcomeModel, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
-			// NOTE: selection is read by parent app via currentAction()
+			// NOTE: set a one-shot flag — the parent reads it and resets the model
+			m.enterPressed = true
 		case "u":
 			// NOTE: update action will be handled by parent app model
 		}
@@ -323,13 +319,18 @@ func (m WelcomeModel) View() string {
 }
 
 func (m WelcomeModel) IsNewProjectSelected() bool {
-	return m.currentAction() == MENU_NEW_PROJECT
+	return m.enterPressed && m.currentAction() == MENU_NEW_PROJECT
 }
 
 func (m WelcomeModel) IsBrowsePackagesSelected() bool {
-	return m.currentAction() == MENU_BROWSE_PACKAGES
+	return m.enterPressed && m.currentAction() == MENU_BROWSE_PACKAGES
 }
 
 func (m WelcomeModel) IsUpdateSelected() bool {
-	return m.currentAction() == MENU_UPDATE
+	return m.enterPressed && m.currentAction() == MENU_UPDATE
+}
+
+// ConsumeEnter resets the one-shot enterPressed flag after the parent has acted on it.
+func (m *WelcomeModel) ConsumeEnter() {
+	m.enterPressed = false
 }
