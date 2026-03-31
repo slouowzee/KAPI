@@ -8,13 +8,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/slouowzee/kapi/internal/ecosystem"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
 const (
 	FOLDER_MODE_MENU = iota
 	FOLDER_MODE_INPUT
-	FOLDER_MODE_CONFIRM
 )
 
 const (
@@ -30,6 +30,7 @@ type FolderModel struct {
 	cursor int
 
 	workDir string
+	workDirEco ecosystem.Ecosystem
 
 	input       string
 	inputCursor int
@@ -38,11 +39,6 @@ type FolderModel struct {
 
 	easterEggMsg string
 	dangerMsg    string
-
-	confirmPath   string
-	confirmCursor int
-
-	createError error
 
 	selected string
 	done     bool
@@ -53,31 +49,28 @@ type FolderModel struct {
 func NewFolder(width, height int) FolderModel {
 	dir, _ := os.Getwd()
 	return FolderModel{
-		width:   width,
-		height:  height,
-		workDir: dir,
+		width:      width,
+		height:     height,
+		workDir:    dir,
+		workDirEco: ecosystem.Detect(dir),
 	}
 }
 
+// SetSize updates terminal dimensions without resetting state.
 func (m *FolderModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 }
 
-// SelectedDir returns the confirmed directory path.
+// SelectedDir returns the chosen directory path.
 // The caller should check Done() before using this.
 func (m FolderModel) SelectedDir() string { return m.selected }
 func (m FolderModel) Done() bool          { return m.done }
 
-// IsInputMode returns true when the folder screen is in typing mode.
-// The parent app uses this to avoid intercepting printable keys like q.
-func (m FolderModel) IsInputMode() bool {
-	return m.mode == FOLDER_MODE_INPUT
-}
-
+func (m FolderModel) IsInputMode() bool { return m.mode == FOLDER_MODE_INPUT }
 func (m FolderModel) IsBack() bool { return m.backPressed }
-
 func (m *FolderModel) ConsumeBack() { m.backPressed = false }
+func (m *FolderModel) ConsumeDone() { m.done = false }
 
 func (m FolderModel) Init() tea.Cmd { return nil }
 
@@ -119,22 +112,14 @@ func (m FolderModel) Update(msg tea.Msg) (FolderModel, tea.Cmd) {
 				if m.dangerMsg != "" {
 					break
 				}
-				path := expandPath(m.input)
 				if m.input == "" {
 					break
-				} else if !strings.ContainsRune(m.input, filepath.Separator) {
-					break
-				} else if info, err := os.Stat(path); err == nil && info.IsDir() {
-					// Path exists — select it directly
-					m.selected = path
-					m.done = true
-				} else {
-					// Path does not exist — ask for confirmation to create it
-					m.confirmPath = path
-					m.confirmCursor = 0
-					m.createError = nil
-					m.mode = FOLDER_MODE_CONFIRM
 				}
+				if !strings.ContainsRune(m.input, filepath.Separator) {
+					break
+				}
+				m.selected = expandPath(m.input)
+				m.done = true
 			case "esc":
 				m.mode = FOLDER_MODE_MENU
 				m.input = ""
@@ -143,7 +128,6 @@ func (m FolderModel) Update(msg tea.Msg) (FolderModel, tea.Cmd) {
 				m.easterEggMsg = ""
 				m.dangerMsg = ""
 			case "tab":
-				// Apply the highlighted suggestion
 				if len(m.suggestions) > 0 {
 					m.input = m.suggestions[m.sugCursor] + string(filepath.Separator)
 					m.inputCursor = len([]rune(m.input))
@@ -181,6 +165,7 @@ func (m FolderModel) Update(msg tea.Msg) (FolderModel, tea.Cmd) {
 					m.dangerMsg = isDangerous(m.input)
 				}
 			case "ctrl+backspace", "ctrl+w":
+				// Delete from the cursor back to the previous separator
 				runes := []rune(m.input)
 				pos := m.inputCursor
 				if pos == 0 {
@@ -217,39 +202,6 @@ func (m FolderModel) Update(msg tea.Msg) (FolderModel, tea.Cmd) {
 					m.dangerMsg = isDangerous(m.input)
 				}
 			}
-
-		case FOLDER_MODE_CONFIRM:
-			switch msg.String() {
-			case "up", "k":
-				if m.confirmCursor > 0 {
-					m.confirmCursor--
-				}
-			case "down", "j":
-				if m.confirmCursor < 1 {
-					m.confirmCursor++
-				}
-			case "enter":
-				if m.confirmCursor == 0 {
-					if err := os.MkdirAll(m.confirmPath, 0755); err != nil {
-						m.createError = err
-					} else {
-						m.selected = m.confirmPath
-						m.done = true
-					}
-				} else {
-					m.mode = FOLDER_MODE_INPUT
-					m.input = m.confirmPath
-					m.suggestions = listDirs(m.input)
-					m.sugCursor = 0
-					m.createError = nil
-				}
-			case "esc":
-				m.mode = FOLDER_MODE_INPUT
-				m.input = m.confirmPath
-				m.suggestions = listDirs(m.input)
-				m.sugCursor = 0
-				m.createError = nil
-			}
 		}
 	}
 
@@ -266,18 +218,29 @@ func (m FolderModel) View() string {
 	switch m.mode {
 
 	case FOLDER_MODE_MENU:
-		label0 := fmt.Sprintf("Use current directory   %s", styles.DimStyle.Render("("+truncatePath(m.workDir)+")"))
+		dirLabel := "(" + truncatePath(m.workDir) + ")"
+		var ecoBadge string
+		if m.workDirEco != ecosystem.ECOSYSTEM_NONE {
+			ecoBadge = "  " + styles.SuccessStyle.Render(m.workDirEco.Label())
+		}
 		items := []string{
-			label0,
+			"Use current directory",
 			"Enter a custom path",
 		}
 		for i, item := range items {
 			if i == m.cursor {
 				cur := lipgloss.NewStyle().Foreground(styles.COLOR_PRIMARY).Bold(true).Render("  ❯❯")
 				label := styles.SelectedStyle.Render(" " + item)
+				if i == MENU_ITEM_CURRENT {
+					label += styles.DimStyle.Render("   "+dirLabel) + ecoBadge
+				}
 				sb.WriteString(fmt.Sprintf("%s%s\n", cur, label))
 			} else {
-				sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(item)))
+				line := item
+				if i == MENU_ITEM_CURRENT {
+					line += fmt.Sprintf("   %s%s", styles.DimStyle.Render(dirLabel), ecoBadge)
+				}
+				sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(line)))
 			}
 		}
 
@@ -288,8 +251,7 @@ func (m FolderModel) View() string {
 		inputLine := styles.MutedStyle.Render("  Path: ") +
 			before + styles.TitleStyle.Render("_") + after
 		if len(m.suggestions) > 0 {
-			counter := styles.DimStyle.Render(fmt.Sprintf("  %d / %d", m.sugCursor+1, len(m.suggestions)))
-			inputLine += counter
+			inputLine += styles.DimStyle.Render(fmt.Sprintf("  %d / %d", m.sugCursor+1, len(m.suggestions)))
 		}
 		sb.WriteString(inputLine + "\n")
 
@@ -303,22 +265,21 @@ func (m FolderModel) View() string {
 			sb.WriteString(styles.DimStyle.Render("  Use an absolute path starting with /") + "\n")
 		} else if strings.ContainsRune(m.input, filepath.Separator) {
 			if info, err := os.Stat(path); err == nil && info.IsDir() {
-				sb.WriteString(styles.SuccessStyle.Render("  ✓ valid directory") + "\n")
+				sb.WriteString(styles.SuccessStyle.Render("  ✓ directory exists") + "\n")
+				if eco := ecosystem.Detect(path); eco != ecosystem.ECOSYSTEM_NONE {
+					sb.WriteString(styles.SubtitleStyle.Render("  ⚠ An existing "+eco.Label()+" was detected here") + "\n")
+				}
 			} else if m.input != "" {
-				sb.WriteString(styles.DimStyle.Render("  ↵ to create this directory") + "\n")
+				sb.WriteString(styles.DimStyle.Render("  ↵ to use this path") + "\n")
 			}
 		}
 
-		// Suggestions list with a scrolling window of up to 9 visible entries.
-		// The window follows the cursor so the selected item is always visible.
 		if len(m.suggestions) > 0 {
 			sb.WriteString("\n")
 
 			const VISIBLE = 9
 			total := len(m.suggestions)
 
-			// Compute the start of the window so that sugCursor stays inside it.
-			// We try to keep the cursor in the middle of the window when possible.
 			windowStart := m.sugCursor - VISIBLE/2
 			if windowStart < 0 {
 				windowStart = 0
@@ -353,41 +314,16 @@ func (m FolderModel) View() string {
 				sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("      ↓ %d more", total-windowEnd)) + "\n")
 			}
 		}
-
-	case FOLDER_MODE_CONFIRM:
-		sb.WriteString(styles.MutedStyle.Render("  Directory to create:") + "\n")
-		sb.WriteString("  " + styles.TitleStyle.Render(m.confirmPath) + "\n")
-		sb.WriteString("\n")
-		sb.WriteString(styles.SubtitleStyle.Render("  This directory does not exist yet. Create it?") + "\n")
-		sb.WriteString("\n")
-
-		if m.createError != nil {
-			sb.WriteString(styles.ErrorStyle.Render("  ✗ "+m.createError.Error()) + "\n")
-			sb.WriteString("\n")
-		}
-
-		confirmItems := []string{"Yes, create it", "No, go back"}
-		for i, item := range confirmItems {
-			if i == m.confirmCursor {
-				cur := lipgloss.NewStyle().Foreground(styles.COLOR_PRIMARY).Bold(true).Render("  ❯❯")
-				sb.WriteString(fmt.Sprintf("%s%s\n", cur, styles.SelectedStyle.Render(" "+item)))
-			} else {
-				sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(item)))
-			}
-		}
 	}
 
 	sb.WriteString("\n")
 
-	// Hints bar
 	var hints string
 	switch m.mode {
 	case FOLDER_MODE_MENU:
 		hints = "  [↑↓] navigate   [↵] select   [esc] back   [q] quit"
 	case FOLDER_MODE_INPUT:
 		hints = "  [↑↓] suggestions   [tab] complete   [↵] confirm   [esc] back   [ctrl+c] quit"
-	case FOLDER_MODE_CONFIRM:
-		hints = "  [↑↓] navigate   [↵] confirm   [esc] back   [q] quit"
 	}
 	sb.WriteString(styles.MutedStyle.Render(hints) + "\n")
 
@@ -414,8 +350,6 @@ func expandPath(path string) string {
 	return path
 }
 
-// listDirs returns subdirectory names that match the current input prefix,
-// used to power the tab-completion suggestions.
 func listDirs(input string) []string {
 	if input == "" || !strings.ContainsRune(input, filepath.Separator) {
 		return nil

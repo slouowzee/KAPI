@@ -271,17 +271,6 @@ func (m WelcomeModel) View() string {
 
 	sb.WriteString("\n")
 
-	// Working directory + ecosystem badge
-	pathStr := truncatePath(m.workDir)
-	pathLine := styles.MutedStyle.Render("  " + pathStr)
-	if label := m.ecosystem.Label(); label != "" {
-		badge := lipgloss.NewStyle().Foreground(styles.COLOR_SUCCESS).Render("  · " + label)
-		pathLine = pathLine + badge
-	}
-	sb.WriteString(pathLine + "\n")
-
-	sb.WriteString("\n")
-
 	if m.updateReady && m.updateInfo.Available {
 		msg := fmt.Sprintf(
 			"  KAPI is updating from %s to %s, press [u] to KAPI !",

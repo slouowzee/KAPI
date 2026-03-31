@@ -10,14 +10,19 @@ type Screen int
 const (
 	SCREEN_WELCOME Screen = iota
 	SCREEN_FOLDER
+	SCREEN_ECOSYSTEM
 )
 
 type App struct {
-	screen  Screen
-	width   int
-	height  int
-	welcome screens.WelcomeModel
-	folder  screens.FolderModel
+	screen    Screen
+	width     int
+	height    int
+	welcome   screens.WelcomeModel
+	folder    screens.FolderModel
+	ecosystem screens.EcosystemModel
+
+	// selectedDir carries the folder choice between screens
+	selectedDir string
 }
 
 func New() App {
@@ -42,6 +47,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.welcome.SetSize(msg.Width, msg.Height)
 		case SCREEN_FOLDER:
 			a.folder.SetSize(msg.Width, msg.Height)
+		case SCREEN_ECOSYSTEM:
+			a.ecosystem.SetSize(msg.Width, msg.Height)
 		}
 
 	case tea.KeyMsg:
@@ -89,7 +96,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if updated.Done() {
-			// TODO: transition to ecosystem selection screen with updated.SelectedDir()
+			a.folder.ConsumeDone()
+			a.selectedDir = updated.SelectedDir()
+			a.screen = SCREEN_ECOSYSTEM
+			a.ecosystem = screens.NewEcosystem(a.width, a.height, a.selectedDir)
+			return a, a.ecosystem.Init()
+		}
+		return a, cmd
+
+	case SCREEN_ECOSYSTEM:
+		updated, cmd := a.ecosystem.Update(msg)
+		a.ecosystem = updated
+
+		if updated.IsBack() {
+			a.ecosystem.ConsumeBack()
+			a.screen = SCREEN_FOLDER
+			return a, nil
+		}
+		if updated.Done() {
+			a.ecosystem.ConsumeDone()
+			// TODO: transition to framework selection screen
 		}
 		return a, cmd
 	}
@@ -103,6 +129,8 @@ func (a App) View() string {
 		return a.welcome.View()
 	case SCREEN_FOLDER:
 		return a.folder.View()
+	case SCREEN_ECOSYSTEM:
+		return a.ecosystem.View()
 	}
 	return ""
 }
