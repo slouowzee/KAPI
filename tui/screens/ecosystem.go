@@ -22,7 +22,7 @@ type ecosystemItem struct {
 
 var ecosystemItems = []ecosystemItem{
 	{label: "PHP", desc: "Laravel, Symfony, WordPress and more"},
-	{label: "JavaScript", desc: "React, Vue, Next.js and more"},
+	{label: "JS/TS", desc: "React, Vue, Next.js and more"},
 }
 
 type EcosystemModel struct {
@@ -31,7 +31,7 @@ type EcosystemModel struct {
 
 	cursor int
 
-	targetDir string
+	targetDir    string
 	targetDirEco ecosystem.Ecosystem
 
 	selected int
@@ -61,7 +61,7 @@ func (m *EcosystemModel) SetSize(width, height int) {
 func (m EcosystemModel) SelectedEcosystem() int { return m.selected }
 func (m EcosystemModel) Done() bool             { return m.done }
 
-func (m EcosystemModel) IsBack() bool { return m.backPressed }
+func (m EcosystemModel) IsBack() bool  { return m.backPressed }
 func (m *EcosystemModel) ConsumeBack() { m.backPressed = false }
 func (m *EcosystemModel) ConsumeDone() { m.done = false }
 
