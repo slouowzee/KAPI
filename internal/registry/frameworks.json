@@ -73,6 +73,60 @@
       "github_repo": "drupal/drupal"
     },
     {
+      "id": "cakephp",
+      "name": "CakePHP",
+      "ecosystem": "php",
+      "description": "Rapid development framework for PHP with a proven track record",
+      "tags": ["mvc", "full-stack", "orm", "rapid-development"],
+      "packagist_package": "cakephp/cakephp",
+      "github_repo": "cakephp/cakephp"
+    },
+    {
+      "id": "laminas",
+      "name": "Laminas",
+      "ecosystem": "php",
+      "description": "Enterprise-grade components and MVC framework, successor to Zend Framework",
+      "tags": ["mvc", "enterprise", "components", "psr"],
+      "packagist_package": "laminas/laminas-mvc",
+      "github_repo": "laminas/laminas-mvc"
+    },
+    {
+      "id": "phalcon",
+      "name": "Phalcon",
+      "ecosystem": "php",
+      "description": "High performance PHP framework delivered as a C extension",
+      "tags": ["mvc", "performance", "c-extension", "full-stack"],
+      "packagist_package": "phalcon/ide-stubs",
+      "github_repo": "phalcon/cphalcon"
+    },
+    {
+      "id": "fuelphp",
+      "name": "FuelPHP",
+      "ecosystem": "php",
+      "description": "Simple, flexible, community-driven PHP framework with HMVC support",
+      "tags": ["mvc", "hmvc", "full-stack", "orm"],
+      "packagist_package": "fuel/fuel",
+      "github_repo": "fuel/fuel"
+    },
+    {
+      "id": "leafphp",
+      "name": "Leaf PHP",
+      "ecosystem": "php",
+      "description": "Simple, lightweight and expressive PHP micro-framework",
+      "tags": ["micro", "api", "rest", "lightweight", "modern"],
+      "packagist_package": "leafs/leaf",
+      "github_repo": "leafsphp/leaf"
+    },
+    {
+      "id": "api-platform",
+      "name": "API Platform",
+      "ecosystem": "php",
+      "description": "REST and GraphQL framework to build API-first projects, built on Symfony",
+      "tags": ["api", "rest", "graphql", "symfony", "json-ld"],
+      "packagist_package": "api-platform/core",
+      "github_repo": "api-platform/api-platform"
+    },
+    {
       "id": "nextjs",
       "name": "Next.js",
       "ecosystem": "js",

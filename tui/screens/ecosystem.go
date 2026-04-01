@@ -5,14 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/slouowzee/kapi/internal/ecosystem"
 	"github.com/slouowzee/kapi/tui/styles"
-)
-
-const (
-	ECOSYSTEM_PHP = 0
-	ECOSYSTEM_JS  = 1
 )
 
 type ecosystemItem struct {
@@ -109,7 +103,7 @@ func (m EcosystemModel) View() string {
 
 	for i, item := range ecosystemItems {
 		if i == m.cursor {
-			cur := lipgloss.NewStyle().Foreground(styles.COLOR_PRIMARY).Bold(true).Render("  ❯❯")
+			cur := styles.CursorStyle.Render("  ❯❯")
 			label := styles.SelectedStyle.Render(" " + item.label)
 			desc := styles.DimStyle.Render("   " + item.desc)
 			sb.WriteString(fmt.Sprintf("%s%s%s\n", cur, label, desc))

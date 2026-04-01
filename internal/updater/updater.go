@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CURRENT_VERSION    = "v0.1.0"
+	CURRENT_VERSION    = "v1.0.0"
 	GITHUB_RELEASE_URL = "https://api.github.com/repos/slouowzee/KAPI/releases/latest"
 )
 
@@ -23,7 +23,6 @@ type UpdateInfo struct {
 	LatestVersion  string
 }
 
-// checkLatestVersion fetches the latest release tag from GitHub
 func checkLatestVersion() (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -58,8 +57,6 @@ func isNewer(current, latest string) bool {
 		latest > current
 }
 
-// Check fetches the latest version and returns update info
-// It is designed to be called in a goroutine — results are sent via the returned channel
 func Check() <-chan UpdateInfo {
 	ch := make(chan UpdateInfo, 1)
 

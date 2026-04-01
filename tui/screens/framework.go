@@ -2,7 +2,6 @@ package screens
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,13 +31,7 @@ func loadFrameworksCmd() tea.Cmd {
 
 func loadTrendsCmd(fw registry.Framework) tea.Cmd {
 	return func() tea.Msg {
-		token := os.Getenv("GITHUB_TOKEN")
-		if token == "" {
-			if cfg, err := config.Load(); err == nil {
-				token = cfg.GithubToken
-			}
-		}
-		stats := trends.Fetch(fw.NpmPackage, fw.PackagistPackage, fw.GithubRepo, token)
+		stats := trends.Fetch(fw.NpmPackage, fw.PackagistPackage, fw.GithubRepo, config.GithubToken())
 		return trendsLoadedMsg{frameworkID: fw.ID, stats: stats}
 	}
 }
@@ -59,8 +52,7 @@ type FrameworkModel struct {
 	loading bool
 	loadErr error
 
-	statsCache   map[string]trends.Stats
-	statsLoading bool
+	statsCache map[string]trends.Stats
 
 	selected registry.Framework
 	done     bool
@@ -71,7 +63,7 @@ type FrameworkModel struct {
 
 func NewFramework(width, height int, ecosystemIdx int, targetDir string) FrameworkModel {
 	eco := "php"
-	if ecosystemIdx == ECOSYSTEM_JS {
+	if ecosystemIdx == 1 {
 		eco = "js"
 	}
 	return FrameworkModel{
@@ -128,15 +120,21 @@ func (m FrameworkModel) Update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
 		m.visible = m.all
 		m.cursor = 0
 		if len(m.all) > 0 {
-			return m, loadTrendsCmd(m.all[0])
+			cmds := make([]tea.Cmd, len(m.all))
+			for i, fw := range m.all {
+				cmds[i] = loadTrendsCmd(fw)
+			}
+			return m, tea.Batch(cmds...)
 		}
 
 	case trendsLoadedMsg:
-		m.statsLoading = false
 		m.statsCache[msg.frameworkID] = msg.stats
 
 	case tea.KeyMsg:
 		if m.loading {
+			if msg.String() == "esc" {
+				m.backPressed = true
+			}
 			break
 		}
 		switch msg.String() {
@@ -156,12 +154,10 @@ func (m FrameworkModel) Update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				return m, m.maybeLoadStats()
 			}
 		case "down", "j":
 			if m.cursor < len(m.visible)-1 {
 				m.cursor++
-				return m, m.maybeLoadStats()
 			}
 		case "backspace":
 			if len(m.query) > 0 {
@@ -169,14 +165,12 @@ func (m FrameworkModel) Update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
 				m.query = string(runes[:len(runes)-1])
 				m.visible = fuzzyFilter(m.all, m.query)
 				m.cursor = 0
-				return m, m.maybeLoadStats()
 			}
 		default:
 			if len(msg.Runes) > 0 {
 				m.query += string(msg.Runes)
 				m.visible = fuzzyFilter(m.all, m.query)
 				m.cursor = 0
-				return m, m.maybeLoadStats()
 			}
 		}
 	}
@@ -184,16 +178,18 @@ func (m FrameworkModel) Update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m *FrameworkModel) maybeLoadStats() tea.Cmd {
-	fw, ok := m.currentFramework()
-	if !ok {
-		return nil
+func layoutWidths(totalWidth int) (listWidth, panelWidth int) {
+	const margin = 6
+	avail := totalWidth - margin
+	listWidth = (avail * 6) / 10
+	if listWidth < 30 {
+		listWidth = 30
 	}
-	if _, cached := m.statsCache[fw.ID]; cached {
-		return nil
+	panelWidth = avail - listWidth - 3
+	if panelWidth < 20 {
+		panelWidth = 20
 	}
-	m.statsLoading = true
-	return loadTrendsCmd(fw)
+	return
 }
 
 func (m FrameworkModel) View() string {
@@ -207,32 +203,22 @@ func (m FrameworkModel) View() string {
 	if m.loading {
 		sb.WriteString(styles.DimStyle.Render("  Loading…") + "\n")
 		sb.WriteString("\n")
-		sb.WriteString(styles.MutedStyle.Render("  [esc] back   [q] quit") + "\n")
+		sb.WriteString(styles.MutedStyle.Render("  [esc] back   [ctrl+c] quit") + "\n")
 		return sb.String()
 	}
 
 	if m.loadErr != nil {
 		sb.WriteString(styles.ErrorStyle.Render("  ✗ Failed to load frameworks: "+m.loadErr.Error()) + "\n")
 		sb.WriteString("\n")
-		sb.WriteString(styles.MutedStyle.Render("  [esc] back   [q] quit") + "\n")
+		sb.WriteString(styles.MutedStyle.Render("  [esc] back   [ctrl+c] quit") + "\n")
 		return sb.String()
 	}
 
 	leftCol := m.renderList()
 	rightCol := m.renderStats()
 
-	margin := 6
-	availWidth := m.width - margin
-	listWidth := (availWidth * 6) / 10
-	if listWidth < 30 {
-		listWidth = 30
-	}
-	panelWidth := availWidth - listWidth - 3
-	if panelWidth < 20 {
-		panelWidth = 20
-	}
-
-	boxHeight := 9
+	listWidth, panelWidth := layoutWidths(m.width)
+	boxHeight := 13
 
 	leftStyle := lipgloss.NewStyle().
 		Width(listWidth).
@@ -274,15 +260,9 @@ func (m FrameworkModel) View() string {
 func (m FrameworkModel) renderList() string {
 	var sb strings.Builder
 
-	margin := 6
-	availWidth := m.width - margin
-	listWidth := (availWidth * 6) / 10
-	if listWidth < 30 {
-		listWidth = 30
-	}
+	listWidth, _ := layoutWidths(m.width)
 	sepWidth := listWidth
 
-	// Search input line
 	if m.query == "" {
 		sb.WriteString(styles.MutedStyle.Render(" Search: ") +
 			styles.DimStyle.Render("type to filter…") +
@@ -306,7 +286,7 @@ func (m FrameworkModel) renderList() string {
 
 	sb.WriteString(separator + "\n")
 
-	const VISIBLE = 7
+	const VISIBLE = 9
 	total := len(m.visible)
 
 	windowStart := m.cursor - VISIBLE/2
@@ -331,7 +311,7 @@ func (m FrameworkModel) renderList() string {
 	for i, fw := range m.visible[windowStart:windowEnd] {
 		absIdx := windowStart + i
 		if absIdx == m.cursor {
-			cur := lipgloss.NewStyle().Foreground(styles.COLOR_PRIMARY).Bold(true).Render(" ❯❯")
+			cur := styles.CursorStyle.Render(" ❯❯")
 			label := styles.SelectedStyle.Render(" " + fw.Name)
 			sb.WriteString(fmt.Sprintf("%s%s\n", cur, label))
 		} else {
@@ -390,6 +370,9 @@ func (m FrameworkModel) renderStats() string {
 		}
 		sb.WriteString(styles.MutedStyle.Render(label) +
 			styles.MutedStyle.Render(formatNum(stats.WeeklyDownloads)) + "\n")
+	}
+	if fw.GithubRepo != "" {
+		sb.WriteString("\n" + styles.LinkStyle.Render("github.com/"+fw.GithubRepo) + "\n")
 	}
 
 	return sb.String()
@@ -461,22 +444,9 @@ func levenshtein(a, b string) int {
 			if ra[i-1] == rb[j-1] {
 				cost = 0
 			}
-			curr[j] = min3(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
+			curr[j] = min(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
 		}
 		prev, curr = curr, prev
 	}
 	return prev[lb]
-}
-
-func min3(a, b, c int) int {
-	if a < b {
-		if a < c {
-			return a
-		}
-		return c
-	}
-	if b < c {
-		return b
-	}
-	return c
 }

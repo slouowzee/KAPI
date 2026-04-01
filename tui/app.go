@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/slouowzee/kapi/internal/registry"
 	"github.com/slouowzee/kapi/tui/screens"
 )
 
@@ -12,6 +13,7 @@ const (
 	SCREEN_FOLDER
 	SCREEN_ECOSYSTEM
 	SCREEN_FRAMEWORK
+	SCREEN_PACKAGES
 )
 
 type App struct {
@@ -22,9 +24,11 @@ type App struct {
 	folder    screens.FolderModel
 	ecosystem screens.EcosystemModel
 	framework screens.FrameworkModel
+	packages  screens.PackagesModel
 
 	selectedDir       string
 	selectedEcosystem int
+	selectedFramework registry.Framework
 }
 
 func New() App {
@@ -50,6 +54,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.folder.SetSize(msg.Width, msg.Height)
 		case SCREEN_ECOSYSTEM:
 			a.ecosystem.SetSize(msg.Width, msg.Height)
+		case SCREEN_FRAMEWORK:
+			a.framework.SetSize(msg.Width, msg.Height)
+		case SCREEN_PACKAGES:
+			a.packages.SetSize(msg.Width, msg.Height)
 		}
 
 	case tea.KeyMsg:
@@ -60,7 +68,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.screen == SCREEN_FOLDER && a.folder.IsInputMode() {
 				break
 			}
-			if a.screen == SCREEN_FRAMEWORK {
+			if a.screen == SCREEN_FRAMEWORK || a.screen == SCREEN_PACKAGES {
 				break
 			}
 			return a, tea.Quit
@@ -135,7 +143,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if updated.Done() {
 			a.framework.ConsumeDone()
-			// TODO: transition to packages screen
+			a.selectedFramework = updated.SelectedFramework()
+			a.screen = SCREEN_PACKAGES
+			a.packages = screens.NewPackages(a.width, a.height, a.selectedFramework, a.selectedDir)
+			return a, a.packages.Init()
+		}
+		return a, cmd
+
+	case SCREEN_PACKAGES:
+		updated, cmd := a.packages.Update(msg)
+		a.packages = updated
+
+		if updated.IsBack() {
+			a.packages.ConsumeBack()
+			a.screen = SCREEN_FRAMEWORK
+			return a, nil
+		}
+		if updated.Done() {
+			a.packages.ConsumeDone()
+			// TODO: transition to git screen
 		}
 		return a, cmd
 	}
@@ -153,6 +179,8 @@ func (a App) View() string {
 		return a.ecosystem.View()
 	case SCREEN_FRAMEWORK:
 		return a.framework.View()
+	case SCREEN_PACKAGES:
+		return a.packages.View()
 	}
 	return ""
 }
