@@ -4,10 +4,39 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+func semverGreater(a, b string) bool {
+	partsA := strings.Split(strings.TrimPrefix(a, "v"), ".")
+	partsB := strings.Split(strings.TrimPrefix(b, "v"), ".")
+	maxLen := len(partsA)
+	if len(partsB) > maxLen {
+		maxLen = len(partsB)
+	}
+	for i := 0; i < maxLen; i++ {
+		var sa, sb string
+		if i < len(partsA) {
+			sa = partsA[i]
+		}
+		if i < len(partsB) {
+			sb = partsB[i]
+		}
+		na, errA := strconv.Atoi(sa)
+		nb, errB := strconv.Atoi(sb)
+		if errA == nil && errB == nil {
+			if na != nb {
+				return na > nb
+			}
+		} else if sa != sb {
+			return sa > sb
+		}
+	}
+	return false
+}
 
 const FETCH_TIMEOUT = 5 * time.Second
 const STARS_CACHE_TTL = 1 * time.Hour
@@ -68,7 +97,6 @@ func Fetch(npmPackage, packagistPackage, githubRepo string, githubToken string) 
 func fetchNpm(client *http.Client, pkg string) (int64, string, error) {
 	encoded := strings.ReplaceAll(pkg, "/", "%2F")
 
-	// Weekly downloads
 	dlURL := fmt.Sprintf("https://api.npmjs.org/downloads/point/last-week/%s", encoded)
 	var dlResp struct {
 		Downloads int64 `json:"downloads"`
@@ -77,7 +105,6 @@ func fetchNpm(client *http.Client, pkg string) (int64, string, error) {
 		return 0, "", err
 	}
 
-	// Latest version
 	metaURL := fmt.Sprintf("https://registry.npmjs.org/%s/latest", encoded)
 	var metaResp struct {
 		Version string `json:"version"`
@@ -92,7 +119,6 @@ func fetchNpm(client *http.Client, pkg string) (int64, string, error) {
 func fetchPackagist(client *http.Client, pkg string) (int64, string, error) {
 	url := fmt.Sprintf("https://packagist.org/packages/%s.json", pkg)
 
-	// Weekly downloads
 	var resp struct {
 		Package struct {
 			Downloads struct {
@@ -107,11 +133,10 @@ func fetchPackagist(client *http.Client, pkg string) (int64, string, error) {
 		return 0, "", err
 	}
 
-	// LTS
 	latest := ""
 	for v := range resp.Package.Versions {
 		if !strings.Contains(v, "dev") && !strings.HasPrefix(v, "v0.") {
-			if latest == "" || v > latest {
+			if latest == "" || semverGreater(v, latest) {
 				latest = v
 			}
 		}

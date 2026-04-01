@@ -23,9 +23,6 @@ var JS_LOCK_FILES = []string{
 	"deno.lock",
 }
 
-// Detect checks the given directory for known lock files and returns the
-// detected ecosystem(s). It checks PHP and JS independently so that mixed
-// projects (monorepo, Laravel + Inertia, etc.) return ECOSYSTEM_BOTH.
 func Detect(dir string) Ecosystem {
 	hasFile := func(names []string) bool {
 		for _, name := range names {

@@ -39,23 +39,8 @@ var (
 	LinkStyle = lipgloss.NewStyle().
 			Foreground(COLOR_LINK).
 			Underline(true)
-)
 
-var (
-	BorderStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(COLOR_MUTED)
-
-	ActiveBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(COLOR_PRIMARY)
-)
-
-var (
-	PaddedStyle = lipgloss.NewStyle().
-			Padding(1, 2)
-
-	HintBarStyle = lipgloss.NewStyle().
-			Foreground(COLOR_MUTED).
-			Padding(0, 1)
+	CursorStyle = lipgloss.NewStyle().
+			Foreground(COLOR_PRIMARY).
+			Bold(true)
 )

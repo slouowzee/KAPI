@@ -99,8 +99,6 @@ func NewWelcome(width, height int) WelcomeModel {
 	}
 }
 
-// SetSize updates the terminal dimensions without resetting any state.
-// Called on tea.WindowSizeMsg to handle terminal resizes gracefully.
 func (m *WelcomeModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
@@ -273,8 +271,7 @@ func (m WelcomeModel) View() string {
 
 	if m.updateReady && m.updateInfo.Available {
 		msg := fmt.Sprintf(
-			"  KAPI is updating from %s to %s, press [u] to KAPI !",
-			m.updateInfo.CurrentVersion,
+			"  Hey, a new version is available (%s) — press [u] to KAPI !",
 			m.updateInfo.LatestVersion,
 		)
 		sb.WriteString(styles.SuccessStyle.Render(msg) + "\n")
@@ -284,7 +281,7 @@ func (m WelcomeModel) View() string {
 	// Menu
 	for i, item := range m.menuItems {
 		if i == m.cursor {
-			cursor := lipgloss.NewStyle().Foreground(styles.COLOR_PRIMARY).Bold(true).Render("  ❯❯")
+			cursor := styles.CursorStyle.Render("  ❯❯")
 			label := styles.SelectedStyle.Render(" " + item.label)
 			sb.WriteString(fmt.Sprintf("%s%s\n", cursor, label))
 		} else {

@@ -6,11 +6,20 @@ import (
 	"path/filepath"
 )
 
+func GithubToken() string {
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		return tok
+	}
+	if cfg, err := Load(); err == nil && cfg.GithubToken != "" {
+		return cfg.GithubToken
+	}
+	return ""
+}
+
 type Config struct {
 	GithubToken string `json:"github_token,omitempty"`
 }
 
-// Load reads the config file from ~/.config/kapi/config.json.
 func Load() (Config, error) {
 	var cfg Config
 	path, err := configPath()
@@ -30,7 +39,6 @@ func Load() (Config, error) {
 	return cfg, err
 }
 
-// Save writes the config to ~/.config/kapi/config.json.
 func Save(cfg Config) error {
 	path, err := configPath()
 	if err != nil {
