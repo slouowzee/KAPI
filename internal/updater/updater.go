@@ -1,16 +1,17 @@
 package updater
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
-	"time"
+
+	"github.com/slouowzee/kapi/internal/semver"
 )
 
 const (
-	CURRENT_VERSION    = "v1.0.0"
-	GITHUB_RELEASE_URL = "https://api.github.com/repos/slouowzee/KAPI/releases/latest"
+	CurrentVersion   = "v1.0.0"
+	githubReleaseURL = "https://api.github.com/repos/slouowzee/KAPI/releases/latest"
 )
 
 type Release struct {
@@ -23,10 +24,8 @@ type UpdateInfo struct {
 	LatestVersion  string
 }
 
-func checkLatestVersion() (string, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	req, err := http.NewRequest("GET", GITHUB_RELEASE_URL, nil)
+func checkLatestVersion(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubReleaseURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +33,7 @@ func checkLatestVersion() (string, error) {
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	req.Header.Set("User-Agent", "kapi-updater")
 
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -53,23 +52,22 @@ func checkLatestVersion() (string, error) {
 }
 
 func isNewer(current, latest string) bool {
-	return strings.TrimPrefix(latest, "v") != strings.TrimPrefix(current, "v") &&
-		latest > current
+	return semver.Greater(latest, current)
 }
 
-func Check() <-chan UpdateInfo {
+func Check(ctx context.Context) <-chan UpdateInfo {
 	ch := make(chan UpdateInfo, 1)
 
 	go func() {
-		latest, err := checkLatestVersion()
+		latest, err := checkLatestVersion(ctx)
 		if err != nil {
-			ch <- UpdateInfo{Available: false, CurrentVersion: CURRENT_VERSION}
+			ch <- UpdateInfo{Available: false, CurrentVersion: CurrentVersion}
 			return
 		}
 
 		ch <- UpdateInfo{
-			Available:      isNewer(CURRENT_VERSION, latest),
-			CurrentVersion: CURRENT_VERSION,
+			Available:      isNewer(CurrentVersion, latest),
+			CurrentVersion: CurrentVersion,
 			LatestVersion:  latest,
 		}
 	}()

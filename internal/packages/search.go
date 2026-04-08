@@ -1,10 +1,10 @@
 package packages
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/slouowzee/kapi/internal/config"
+	"github.com/slouowzee/kapi/internal/semver"
 )
 
 //go:embed defaults.json
@@ -25,7 +26,7 @@ func init() {
 		Defaults map[string][]string `json:"defaults"`
 	}
 	if err := json.Unmarshal(defaultsJSON, &payload); err != nil {
-		log.Fatalf("kapi: failed to parse embedded defaults.json: %v", err)
+		panic("kapi: failed to parse embedded defaults.json: " + err.Error())
 	}
 	DefaultsByFramework = payload.Defaults
 }
@@ -51,7 +52,6 @@ func extractGithubRepo(repoURL string) string {
 	if len(m) < 2 {
 		return ""
 	}
-	// The regex already strips ".git" via the non-capturing group — no TrimSuffix needed.
 	return m[1]
 }
 
@@ -67,7 +67,7 @@ type starsLocalEntry struct {
 
 const starsCacheTTL = time.Hour
 
-func fetchStars(repo string) int64 {
+func fetchStars(ctx context.Context, repo string) int64 {
 	if repo == "" {
 		return 0
 	}
@@ -78,8 +78,7 @@ func fetchStars(repo string) int64 {
 	}
 	starsLocalMu.Unlock()
 
-	client := &http.Client{Timeout: detailTimeout}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+repo, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+repo, nil)
 	if err != nil {
 		return 0
 	}
@@ -89,6 +88,7 @@ func fetchStars(repo string) int64 {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 
+	client := &http.Client{Timeout: detailTimeout}
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return 0
@@ -109,9 +109,9 @@ func fetchStars(repo string) int64 {
 	return payload.Stars
 }
 
-func enrichNpm(client *http.Client, pkg *Package) {
+func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 	encoded := strings.ReplaceAll(pkg.Name, "/", "%2F")
-	req, err := http.NewRequest(http.MethodGet,
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://registry.npmjs.org/"+encoded+"/latest", nil)
 	if err != nil {
 		return
@@ -144,16 +144,15 @@ func enrichNpm(client *http.Client, pkg *Package) {
 	}
 	repo := extractGithubRepo(meta.Repository.URL)
 	pkg.GithubRepo = repo
-	pkg.Stars = fetchStars(repo)
+	pkg.Stars = fetchStars(ctx, repo)
 
 	if pkg.Weekly == 0 {
-		dlReq, err := http.NewRequest(http.MethodGet,
+		dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
 			"https://api.npmjs.org/downloads/point/last-week/"+encoded, nil)
 		if err == nil {
 			dlReq.Header.Set("User-Agent", "kapi-cli")
 			dlResp, err := client.Do(dlReq)
 			if err == nil {
-				defer dlResp.Body.Close()
 				if dlResp.StatusCode == http.StatusOK {
 					var dl struct {
 						Downloads int64 `json:"downloads"`
@@ -162,13 +161,14 @@ func enrichNpm(client *http.Client, pkg *Package) {
 						pkg.Weekly = dl.Downloads
 					}
 				}
+				dlResp.Body.Close()
 			}
 		}
 	}
 }
 
-func enrichPackagist(client *http.Client, pkg *Package) {
-	req, err := http.NewRequest(http.MethodGet,
+func enrichPackagist(ctx context.Context, client *http.Client, pkg *Package) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://packagist.org/packages/"+pkg.Name+".json", nil)
 	if err != nil {
 		return
@@ -200,7 +200,7 @@ func enrichPackagist(client *http.Client, pkg *Package) {
 
 	for v := range meta.Package.Versions {
 		if !strings.Contains(v, "dev") && !strings.HasPrefix(v, "v0.") {
-			if pkg.Version == "" || semverGreater(v, pkg.Version) {
+			if pkg.Version == "" || semver.Greater(v, pkg.Version) {
 				pkg.Version = v
 			}
 		}
@@ -213,25 +213,32 @@ func enrichPackagist(client *http.Client, pkg *Package) {
 	}
 	repo := extractGithubRepo(meta.Package.Repository)
 	pkg.GithubRepo = repo
-	pkg.Stars = fetchStars(repo)
+	pkg.Stars = fetchStars(ctx, repo)
 }
 
-func enrichAll(pkgs []Package, isPhp bool) []Package {
+func enrichAll(ctx context.Context, pkgs []Package, isPhp bool) []Package {
 	const maxConcurrent = 20
 	sem := make(chan struct{}, maxConcurrent)
 
 	client := &http.Client{Timeout: detailTimeout}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
 	for i := range pkgs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 			if isPhp {
-				enrichPackagist(client, &pkgs[i])
+				enrichPackagist(ctx, client, &pkgs[i])
 			} else {
-				enrichNpm(client, &pkgs[i])
+				enrichNpm(ctx, client, &pkgs[i])
 			}
 		}(i)
 	}
@@ -239,7 +246,7 @@ func enrichAll(pkgs []Package, isPhp bool) []Package {
 	return pkgs
 }
 
-func SearchNpm(query string) ([]Package, error) {
+func SearchNpm(ctx context.Context, query string) ([]Package, error) {
 	endpoint := fmt.Sprintf(
 		"https://registry.npmjs.org/-/v1/search?text=%s&size=%d",
 		url.QueryEscape(query),
@@ -247,7 +254,7 @@ func SearchNpm(query string) ([]Package, error) {
 	)
 
 	client := &http.Client{Timeout: searchTimeout}
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -290,10 +297,10 @@ func SearchNpm(query string) ([]Package, error) {
 		})
 	}
 
-	return enrichAll(results, false), nil
+	return enrichAll(ctx, results, false), nil
 }
 
-func SearchPackagist(query string) ([]Package, error) {
+func SearchPackagist(ctx context.Context, query string) ([]Package, error) {
 	endpoint := fmt.Sprintf(
 		"https://packagist.org/search.json?q=%s&per_page=%d",
 		url.QueryEscape(query),
@@ -301,7 +308,7 @@ func SearchPackagist(query string) ([]Package, error) {
 	)
 
 	client := &http.Client{Timeout: searchTimeout}
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -338,13 +345,13 @@ func SearchPackagist(query string) ([]Package, error) {
 		})
 	}
 
-	return enrichAll(results, true), nil
+	return enrichAll(ctx, results, true), nil
 }
 
-func FetchDefaults(names []string, isPhp bool) []Package {
+func FetchDefaults(ctx context.Context, names []string, isPhp bool) []Package {
 	pkgs := make([]Package, len(names))
 	for i, name := range names {
 		pkgs[i] = Package{Name: name}
 	}
-	return enrichAll(pkgs, isPhp)
+	return enrichAll(ctx, pkgs, isPhp)
 }

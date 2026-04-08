@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ func loadDefaultsCmd(frameworkID string, isPhp bool) tea.Cmd {
 		if !ok || len(names) == 0 {
 			return defaultsLoadedMsg{}
 		}
-		return defaultsLoadedMsg{results: packages.FetchDefaults(names, isPhp)}
+		return defaultsLoadedMsg{results: packages.FetchDefaults(context.Background(), names, isPhp)}
 	}
 }
 
@@ -45,19 +46,18 @@ func searchCmd(query string, isPhp bool) tea.Cmd {
 		var results []packages.Package
 		var err error
 		if isPhp {
-			results, err = packages.SearchPackagist(query)
+			results, err = packages.SearchPackagist(context.Background(), query)
 		} else {
-			results, err = packages.SearchNpm(query)
+			results, err = packages.SearchNpm(context.Background(), query)
 		}
 		return searchResultMsg{query: query, results: results, err: err}
 	}
 }
 
 func debounceCmd(query string) tea.Cmd {
-	return func() tea.Msg {
-		time.Sleep(PACKAGES_DEBOUNCE)
+	return tea.Tick(PACKAGES_DEBOUNCE, func(time.Time) tea.Msg {
 		return debounceMsg{query: query}
-	}
+	})
 }
 
 type PackagesModel struct {
@@ -69,6 +69,7 @@ type PackagesModel struct {
 	targetDir string
 
 	query           string
+	queryPos        int
 	results         []packages.Package
 	defaults        []packages.Package
 	cart            []packages.Package
@@ -78,11 +79,14 @@ type PackagesModel struct {
 	searchErr       error
 	initialPrompt   bool
 
-	done        bool
-	backPressed bool
+	done          bool
+	backPressed   bool
+	backCancelled bool
 
 	focusCart  bool
 	cartCursor int
+
+	savedCart []packages.Package
 }
 
 func NewPackages(width, height int, framework registry.Framework, targetDir string) PackagesModel {
@@ -98,17 +102,37 @@ func NewPackages(width, height int, framework registry.Framework, targetDir stri
 	}
 }
 
+func NewPackagesFromCart(width, height int, framework registry.Framework, targetDir string, cart []packages.Package) PackagesModel {
+	isPhp := framework.Ecosystem == "php"
+	saved := make([]packages.Package, len(cart))
+	copy(saved, cart)
+	return PackagesModel{
+		width:           width,
+		height:          height,
+		framework:       framework,
+		isPhp:           isPhp,
+		targetDir:       targetDir,
+		initialPrompt:   true,
+		loadingDefaults: true,
+		cart:            append([]packages.Package{}, cart...),
+		savedCart:       saved,
+	}
+}
+
 func (m *PackagesModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 }
 
 func (m PackagesModel) SelectedPackages() []packages.Package { return m.cart }
+func (m PackagesModel) SavedPackages() []packages.Package    { return m.savedCart }
 func (m PackagesModel) Done() bool                           { return m.done }
 func (m PackagesModel) IsBack() bool                         { return m.backPressed }
+func (m PackagesModel) IsBackCancelled() bool                { return m.backCancelled }
 
-func (m *PackagesModel) ConsumeBack() { m.backPressed = false }
-func (m *PackagesModel) ConsumeDone() { m.done = false }
+func (m *PackagesModel) ConsumeBack()          { m.backPressed = false }
+func (m *PackagesModel) ConsumeBackCancelled() { m.backCancelled = false }
+func (m *PackagesModel) ConsumeDone()          { m.done = false }
 
 func (m PackagesModel) Init() tea.Cmd {
 	return loadDefaultsCmd(m.framework.ID, m.isPhp)
@@ -180,11 +204,15 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.focusCart = false
 			} else if m.query != "" {
 				m.query = ""
+				m.queryPos = 0
 				m.results = m.defaults
 				m.searching = false
 				m.searchErr = nil
 				m.initialPrompt = true
 				m.cursor = 0
+			} else if m.savedCart != nil {
+				m.cart = append([]packages.Package{}, m.savedCart...)
+				m.backCancelled = true
 			} else {
 				m.backPressed = true
 			}
@@ -211,6 +239,15 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "up", "k":
+			if msg.String() == "k" && !m.focusCart && m.query != "" {
+				runes := []rune(m.query)
+				m.query = string(append(runes[:m.queryPos], append([]rune{'k'}, runes[m.queryPos:]...)...))
+				m.queryPos++
+				m.initialPrompt = false
+				m.searching = true
+				m.cursor = 0
+				return m, debounceCmd(m.query)
+			}
 			if m.focusCart {
 				if m.cartCursor > 0 {
 					m.cartCursor--
@@ -221,6 +258,15 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "down", "j":
+			if msg.String() == "j" && !m.focusCart && m.query != "" {
+				runes := []rune(m.query)
+				m.query = string(append(runes[:m.queryPos], append([]rune{'j'}, runes[m.queryPos:]...)...))
+				m.queryPos++
+				m.initialPrompt = false
+				m.searching = true
+				m.cursor = 0
+				return m, debounceCmd(m.query)
+			}
 			if m.focusCart {
 				if m.cartCursor < len(m.cart)-1 {
 					m.cartCursor++
@@ -230,11 +276,35 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 					m.cursor++
 				}
 			}
+		case "left":
+			if !m.focusCart && m.queryPos > 0 {
+				m.queryPos--
+			}
+		case "right":
+			if !m.focusCart && m.queryPos < len([]rune(m.query)) {
+				m.queryPos++
+			}
 		case "backspace":
 			m.focusCart = false
-			if len(m.query) > 0 {
+			if m.queryPos > 0 {
 				runes := []rune(m.query)
-				m.query = string(runes[:len(runes)-1])
+				m.query = string(append(runes[:m.queryPos-1], runes[m.queryPos:]...))
+				m.queryPos--
+				m.initialPrompt = m.query == ""
+				if m.query == "" {
+					m.results = m.defaults
+					m.searching = false
+					m.searchErr = nil
+					m.cursor = 0
+				} else {
+					return m, debounceCmd(m.query)
+				}
+			}
+		case "delete":
+			m.focusCart = false
+			runes := []rune(m.query)
+			if m.queryPos < len(runes) {
+				m.query = string(append(runes[:m.queryPos], runes[m.queryPos+1:]...))
 				m.initialPrompt = m.query == ""
 				if m.query == "" {
 					m.results = m.defaults
@@ -248,7 +318,9 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 		default:
 			if len(msg.Runes) > 0 {
 				m.focusCart = false
-				m.query += string(msg.Runes)
+				runes := []rune(m.query)
+				m.query = string(append(runes[:m.queryPos], append(msg.Runes, runes[m.queryPos:]...)...))
+				m.queryPos += len(msg.Runes)
 				m.initialPrompt = false
 				m.searching = true
 				m.cursor = 0
@@ -273,8 +345,8 @@ func (m PackagesModel) View() string {
 	boxHeight := 19
 	packagesVisible := 15
 
-	leftCol := m.renderList(packagesVisible)
-	rightCol := m.renderDetail()
+	leftCol := m.renderList(packagesVisible, listWidth)
+	rightCol := m.renderDetail(panelWidth)
 
 	leftStyle := lipgloss.NewStyle().
 		Width(listWidth).
@@ -315,10 +387,9 @@ func (m PackagesModel) View() string {
 	return sb.String()
 }
 
-func (m PackagesModel) renderList(visible int) string {
+func (m PackagesModel) renderList(visible, listWidth int) string {
 	var sb strings.Builder
 
-	listWidth, _ := layoutWidths(m.width)
 	sepWidth := listWidth - 2
 
 	if m.query == "" {
@@ -327,8 +398,7 @@ func (m PackagesModel) renderList(visible int) string {
 			styles.TitleStyle.Render("_") + "\n")
 	} else {
 		sb.WriteString(styles.MutedStyle.Render(" Search: ") +
-			m.query +
-			styles.TitleStyle.Render("_") + "\n")
+			renderTextInput(m.query, m.queryPos) + "\n")
 	}
 
 	separator := styles.DimStyle.Render(strings.Repeat("─", sepWidth))
@@ -360,20 +430,7 @@ func (m PackagesModel) renderList(visible int) string {
 	}
 
 	total := len(m.results)
-	windowStart := m.cursor - visible/2
-	if windowStart < 0 {
-		windowStart = 0
-	}
-	if windowStart+visible > total {
-		windowStart = total - visible
-	}
-	if windowStart < 0 {
-		windowStart = 0
-	}
-	windowEnd := windowStart + visible
-	if windowEnd > total {
-		windowEnd = total
-	}
+	windowStart, windowEnd := scrollWindow(m.cursor, total, visible)
 
 	if windowStart > 0 {
 		sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↑ %d more", windowStart)) + "\n")
@@ -411,12 +468,9 @@ func (m PackagesModel) renderList(visible int) string {
 	return sb.String()
 }
 
-func (m PackagesModel) renderDetail() string {
-	_, panelWidth := layoutWidths(m.width)
-
+func (m PackagesModel) renderDetail(panelWidth int) string {
 	var sb strings.Builder
 
-	// Details
 	detailLines := 0
 	pkg, ok := m.currentPackage()
 	if ok {
@@ -451,7 +505,6 @@ func (m PackagesModel) renderDetail() string {
 		detailLines++
 	}
 
-	// Cart
 	sb.WriteString("\n")
 	separator := styles.DimStyle.Render(strings.Repeat("─", panelWidth-4))
 	sb.WriteString(separator + "\n")
@@ -468,20 +521,7 @@ func (m PackagesModel) renderDetail() string {
 		const visibleCart = 4
 		total := len(m.cart)
 
-		windowStart := m.cartCursor - visibleCart/2
-		if windowStart < 0 {
-			windowStart = 0
-		}
-		if windowStart+visibleCart > total {
-			windowStart = total - visibleCart
-		}
-		if windowStart < 0 {
-			windowStart = 0
-		}
-		windowEnd := windowStart + visibleCart
-		if windowEnd > total {
-			windowEnd = total
-		}
+		windowStart, windowEnd := scrollWindow(m.cartCursor, total, visibleCart)
 
 		if windowStart > 0 {
 			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("  ↑ %d more", windowStart)) + "\n")

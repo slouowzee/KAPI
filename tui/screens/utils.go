@@ -5,9 +5,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/slouowzee/kapi/tui/styles"
 )
 
 const MAX_PATH_LEN = 50
+
+const (
+	ciChoiceGitHub = "github"
+	ciChoiceGitLab = "gitlab"
+	ciChoiceNone   = "none"
+)
 
 func truncatePath(path string) string {
 	runes := []rune(path)
@@ -17,13 +25,13 @@ func truncatePath(path string) string {
 	return "…" + string(runes[len(runes)-MAX_PATH_LEN+1:])
 }
 
-var fuckYouRe = regexp.MustCompile(`(?i)^fuck you$`)
+var easterEggRe = regexp.MustCompile(`(?i)^fuck you$`)
 
 var tmpRe = regexp.MustCompile(`(?i)^/tmp(/.*)?$`)
 
 func detectEasterEgg(input string) string {
 	trimmed := strings.TrimSpace(input)
-	if fuckYouRe.MatchString(trimmed) {
+	if easterEggRe.MatchString(trimmed) {
 		return fmt.Sprintf("Wym '%s'?, fuck you too dude.", trimmed)
 	}
 	if tmpRe.MatchString(trimmed) {
@@ -69,8 +77,37 @@ var dangerousSegments = []struct {
 	{"vendor", "What? You shouldn't use vendor as a project root, I'm not letting you."},
 }
 
-// isDangerous checks whether the input matches a known dangerous path or
-// contains a dangerous segment.
+func renderTextInput(text string, pos int) string {
+	runes := []rune(text)
+	before := string(runes[:pos])
+	after := string(runes[pos:])
+	cursor := styles.CursorStyle.Render("█")
+	if len(after) > 0 {
+		afterRunes := []rune(after)
+		cursor = styles.CursorStyle.Render(string(afterRunes[0]))
+		after = string(afterRunes[1:])
+	}
+	return before + cursor + after
+}
+
+func scrollWindow(cursor, total, visible int) (start, end int) {
+	start = cursor - visible/2
+	if start < 0 {
+		start = 0
+	}
+	if start+visible > total {
+		start = total - visible
+	}
+	if start < 0 {
+		start = 0
+	}
+	end = start + visible
+	if end > total {
+		end = total
+	}
+	return
+}
+
 func isDangerous(input string) string {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -80,7 +117,6 @@ func isDangerous(input string) string {
 	expanded := expandPath(trimmed)
 	lower := strings.ToLower(expanded)
 
-	// Check for dangerous segments anywhere in the path
 	for _, ds := range dangerousSegments {
 		seg := strings.ToLower(ds.segment)
 		for _, part := range strings.Split(lower, string(filepath.Separator)) {
@@ -90,7 +126,6 @@ func isDangerous(input string) string {
 		}
 	}
 
-	// Check full-path dangerous rules
 	for _, rule := range dangerousRules {
 		if rule.re.MatchString(expanded) {
 			return rule.msg

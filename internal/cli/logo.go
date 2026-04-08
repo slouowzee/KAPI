@@ -7,20 +7,24 @@ import (
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
+var LogoLines = []string{
+	` _  __   _   ___ ___ `,
+	`| |/ /  /_\ | _ \_ _|`,
+	`| ' <  / _ \|  _/| | `,
+	`|_|\_\/_/ \_\_| |___|`,
+}
+
+var LogoGradient = []lipgloss.Color{
+	"#8B6542",
+	"#8A7856",
+	"#88896A",
+	"#7C9A6B",
+}
+
 func PrintLogoAndTitle(title string) {
 	fmt.Println()
-	lines := []string{
-		` _  __   _   ___ ___ `,
-		`| |/ /  /_\ | _ \_ _|`,
-		`| ' <  / _ \|  _/| | `,
-		`|_|\_\/_/ \_\_| |___|`,
-	}
-	colors := []lipgloss.Color{
-		"#8B6542",
-		"#8A7856",
-		"#88896A",
-		"#7C9A6B",
-	}
+	lines := LogoLines
+	colors := LogoGradient
 
 	repoLink := fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\",
 		"https://github.com/slouowzee/kapi",

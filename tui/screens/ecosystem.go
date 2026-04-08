@@ -12,11 +12,12 @@ import (
 type ecosystemItem struct {
 	label string
 	desc  string
+	eco   ecosystem.Ecosystem
 }
 
 var ecosystemItems = []ecosystemItem{
-	{label: "PHP", desc: "Laravel, Symfony, WordPress and more"},
-	{label: "JS/TS", desc: "React, Vue, Next.js and more"},
+	{label: "PHP", desc: "Laravel, Symfony, WordPress and more", eco: ecosystem.ECOSYSTEM_PHP},
+	{label: "JS/TS", desc: "React, Vue, Next.js and more", eco: ecosystem.ECOSYSTEM_JS},
 }
 
 type EcosystemModel struct {
@@ -28,10 +29,9 @@ type EcosystemModel struct {
 	targetDir    string
 	targetDirEco ecosystem.Ecosystem
 
-	selected int
+	selected ecosystem.Ecosystem
 	done     bool
 
-	// backPressed is a one-shot flag set when the user presses esc.
 	backPressed bool
 }
 
@@ -41,7 +41,7 @@ func NewEcosystem(width, height int, targetDir string) EcosystemModel {
 		height:       height,
 		targetDir:    targetDir,
 		targetDirEco: ecosystem.Detect(targetDir),
-		selected:     -1,
+		selected:     ecosystem.ECOSYSTEM_NONE,
 	}
 }
 
@@ -50,10 +50,8 @@ func (m *EcosystemModel) SetSize(width, height int) {
 	m.height = height
 }
 
-// SelectedEcosystem returns the chosen ecosystem index (ECOSYSTEM_PHP or ECOSYSTEM_JS).
-// The caller should check Done() before using this.
-func (m EcosystemModel) SelectedEcosystem() int { return m.selected }
-func (m EcosystemModel) Done() bool             { return m.done }
+func (m EcosystemModel) SelectedEcosystem() ecosystem.Ecosystem { return m.selected }
+func (m EcosystemModel) Done() bool                             { return m.done }
 
 func (m EcosystemModel) IsBack() bool  { return m.backPressed }
 func (m *EcosystemModel) ConsumeBack() { m.backPressed = false }
@@ -79,7 +77,9 @@ func (m EcosystemModel) Update(msg tea.Msg) (EcosystemModel, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
-			m.selected = m.cursor
+			if m.cursor >= 0 && m.cursor < len(ecosystemItems) {
+				m.selected = ecosystemItems[m.cursor].eco
+			}
 			m.done = true
 		case "esc":
 			m.backPressed = true

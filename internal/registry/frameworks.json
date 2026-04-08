@@ -127,6 +127,14 @@
       "github_repo": "api-platform/api-platform"
     },
     {
+      "id": "vanilla-php",
+      "name": "Vanilla",
+      "ecosystem": "php",
+      "type": "library",
+      "description": "Plain PHP project with Composer and 'dogo' (custom mini-CLI)",
+      "tags": ["vanilla", "cli", "dogo", "no-framework", "backend"]
+    },
+    {
       "id": "nextjs",
       "name": "Next.js",
       "ecosystem": "js",
@@ -134,7 +142,8 @@
       "description": "The React framework for production — SSR, SSG and more",
       "tags": ["react", "ssr", "ssg", "full-stack", "vercel"],
       "npm_package": "next",
-      "github_repo": "vercel/next.js"
+      "github_repo": "vercel/next.js",
+      "interactive": true
     },
     {
       "id": "nuxt",
@@ -144,7 +153,8 @@
       "description": "The intuitive Vue framework",
       "tags": ["vue", "ssr", "ssg", "full-stack"],
       "npm_package": "nuxt",
-      "github_repo": "nuxt/nuxt"
+      "github_repo": "nuxt/nuxt",
+      "interactive": true
     },
     {
       "id": "remix",
@@ -154,7 +164,8 @@
       "description": "Full stack web framework focused on web standards and UX",
       "tags": ["react", "full-stack", "ssr", "web-standards"],
       "npm_package": "@remix-run/react",
-      "github_repo": "remix-run/remix"
+      "github_repo": "remix-run/remix",
+      "interactive": true
     },
     {
       "id": "tanstack-start",
@@ -164,7 +175,8 @@
       "description": "Full-stack React framework powered by TanStack Router",
       "tags": ["react", "full-stack", "ssr", "tanstack"],
       "npm_package": "@tanstack/react-start",
-      "github_repo": "TanStack/router"
+      "github_repo": "TanStack/router",
+      "interactive": true
     },
     {
       "id": "astro",
@@ -174,7 +186,8 @@
       "description": "Build faster websites with less client-side JavaScript",
       "tags": ["static", "ssg", "islands", "multi-framework"],
       "npm_package": "astro",
-      "github_repo": "withastro/astro"
+      "github_repo": "withastro/astro",
+      "interactive": true
     },
     {
       "id": "gatsby",
@@ -184,7 +197,8 @@
       "description": "The fastest frontend for the headless web",
       "tags": ["react", "static", "ssg", "graphql"],
       "npm_package": "gatsby",
-      "github_repo": "gatsbyjs/gatsby"
+      "github_repo": "gatsbyjs/gatsby",
+      "interactive": true
     },
     {
       "id": "sveltekit",
@@ -194,7 +208,8 @@
       "description": "The fastest way to build Svelte apps",
       "tags": ["svelte", "ssr", "ssg", "full-stack"],
       "npm_package": "@sveltejs/kit",
-      "github_repo": "sveltejs/kit"
+      "github_repo": "sveltejs/kit",
+      "interactive": true
     },
     {
       "id": "analog",
@@ -204,7 +219,8 @@
       "description": "The fullstack Angular meta-framework",
       "tags": ["angular", "ssr", "ssg", "full-stack"],
       "npm_package": "@analogjs/platform",
-      "github_repo": "analogjs/analog"
+      "github_repo": "analogjs/analog",
+      "interactive": true
     },
     {
       "id": "react-vite",
@@ -280,7 +296,8 @@
       "description": "Ultrafast web framework for the Edges",
       "tags": ["edge", "api", "rest", "bun", "deno", "cloudflare"],
       "npm_package": "hono",
-      "github_repo": "honojs/hono"
+      "github_repo": "honojs/hono",
+      "interactive": true
     },
     {
       "id": "react-native",
@@ -289,7 +306,8 @@
       "description": "Build native mobile apps using React",
       "tags": ["mobile", "ios", "android", "react", "native"],
       "npm_package": "react-native",
-      "github_repo": "facebook/react-native"
+      "github_repo": "facebook/react-native",
+      "interactive": true
     },
     {
       "id": "expo",

@@ -24,6 +24,7 @@ type Framework struct {
 	NpmPackage       string   `json:"npm_package,omitempty"`
 	PackagistPackage string   `json:"packagist_package,omitempty"`
 	GithubRepo       string   `json:"github_repo,omitempty"`
+	Interactive 	 bool     `json:"interactive,omitempty"`
 }
 
 type registryPayload struct {
@@ -39,7 +40,6 @@ func Load() ([]Framework, error) {
 
 func fetchLive() ([]Framework, error) {
 	if API_URL == "#" {
-		// API not up yet
 		return nil, errPlaceholder
 	}
 

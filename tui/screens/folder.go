@@ -29,7 +29,7 @@ type FolderModel struct {
 	mode   int
 	cursor int
 
-	workDir string
+	workDir    string
 	workDirEco ecosystem.Ecosystem
 
 	input       string
@@ -44,33 +44,48 @@ type FolderModel struct {
 	done     bool
 
 	backPressed bool
+	directInput bool
 }
 
-func NewFolder(width, height int) FolderModel {
-	dir, _ := os.Getwd()
+func Folder(width, height int, path string) FolderModel {
+	dir, err := os.Getwd()
+	if err != nil {
+		dir = "."
+	}
+	if path == "" {
+		return FolderModel{
+			width:      width,
+			height:     height,
+			workDir:    dir,
+			workDirEco: ecosystem.Detect(dir),
+		}
+	}
+	input := path + string(filepath.Separator)
 	return FolderModel{
-		width:      width,
-		height:     height,
-		workDir:    dir,
-		workDirEco: ecosystem.Detect(dir),
+		width:       width,
+		height:      height,
+		workDir:     dir,
+		workDirEco:  ecosystem.Detect(dir),
+		mode:        FOLDER_MODE_INPUT,
+		input:       input,
+		inputCursor: len([]rune(input)),
+		suggestions: listDirs(input),
+		directInput: true,
 	}
 }
 
-// SetSize updates terminal dimensions without resetting state.
 func (m *FolderModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 }
 
-// SelectedDir returns the chosen directory path.
-// The caller should check Done() before using this.
 func (m FolderModel) SelectedDir() string { return m.selected }
 func (m FolderModel) Done() bool          { return m.done }
 
 func (m FolderModel) IsInputMode() bool { return m.mode == FOLDER_MODE_INPUT }
-func (m FolderModel) IsBack() bool { return m.backPressed }
-func (m *FolderModel) ConsumeBack() { m.backPressed = false }
-func (m *FolderModel) ConsumeDone() { m.done = false }
+func (m FolderModel) IsBack() bool      { return m.backPressed }
+func (m *FolderModel) ConsumeBack()     { m.backPressed = false }
+func (m *FolderModel) ConsumeDone()     { m.done = false }
 
 func (m FolderModel) Init() tea.Cmd { return nil }
 
@@ -121,6 +136,10 @@ func (m FolderModel) Update(msg tea.Msg) (FolderModel, tea.Cmd) {
 				m.selected = expandPath(m.input)
 				m.done = true
 			case "esc":
+				if m.directInput {
+					m.backPressed = true
+					break
+				}
 				m.mode = FOLDER_MODE_MENU
 				m.input = ""
 				m.inputCursor = 0
@@ -165,7 +184,6 @@ func (m FolderModel) Update(msg tea.Msg) (FolderModel, tea.Cmd) {
 					m.dangerMsg = isDangerous(m.input)
 				}
 			case "ctrl+backspace", "ctrl+w":
-				// Delete from the cursor back to the previous separator
 				runes := []rune(m.input)
 				pos := m.inputCursor
 				if pos == 0 {
@@ -255,7 +273,6 @@ func (m FolderModel) View() string {
 		}
 		sb.WriteString(inputLine + "\n")
 
-		// Inline validation feedback
 		path := expandPath(m.input)
 		if m.dangerMsg != "" {
 			sb.WriteString(styles.ErrorStyle.Render("  ✗ "+m.dangerMsg) + "\n")
@@ -280,20 +297,7 @@ func (m FolderModel) View() string {
 			const VISIBLE = 9
 			total := len(m.suggestions)
 
-			windowStart := m.sugCursor - VISIBLE/2
-			if windowStart < 0 {
-				windowStart = 0
-			}
-			if windowStart+VISIBLE > total {
-				windowStart = total - VISIBLE
-			}
-			if windowStart < 0 {
-				windowStart = 0
-			}
-			windowEnd := windowStart + VISIBLE
-			if windowEnd > total {
-				windowEnd = total
-			}
+			windowStart, windowEnd := scrollWindow(m.sugCursor, total, VISIBLE)
 
 			if windowStart > 0 {
 				sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("      ↑ %d more", windowStart)) + "\n")
@@ -344,8 +348,12 @@ func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			return filepath.Join(home, path[2:])
+			path = filepath.Join(home, path[2:])
 		}
+	}
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		return abs
 	}
 	return path
 }

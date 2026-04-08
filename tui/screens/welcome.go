@@ -1,48 +1,47 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/slouowzee/kapi/internal/cli"
 	"github.com/slouowzee/kapi/internal/ecosystem"
 	"github.com/slouowzee/kapi/internal/updater"
 	"github.com/slouowzee/kapi/tui/styles"
 )
-
-var LOGO_LINES = []string{
-	` _  __   _   ___ ___ `,
-	`| |/ /  /_\ | _ \_ _|`,
-	`| ' <  / _ \|  _/| | `,
-	`|_|\_\/_/ \_\_| |___|`,
-}
 
 const (
 	LOGO_SUBTITLE   = "Keep Accelerating Project Initialization"
 	LOGO_GITHUB     = "github.com/slouowzee/KAPI"
 	LOGO_GITHUB_URL = "https://github.com/slouowzee/KAPI"
 )
-
-// Menu item
 const (
 	MENU_NEW_PROJECT = iota
+	MENU_GIT_CONFIG
 	MENU_BROWSE_PACKAGES
 	MENU_UPDATE
+	MENU_SETTINGS
 )
-
-var LOGO_GRADIENT = []lipgloss.Color{
-	"#8B6542",
-	"#8A7856",
-	"#88896A",
-	"#7C9A6B",
-}
 
 type tickMsg time.Time
 type updateCheckMsg updater.UpdateInfo
 type uiRevealMsg struct{}
+type gitDetectWelcomeMsg struct{ hasGit bool }
+
+func detectGitWelcomeCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		return gitDetectWelcomeMsg{hasGit: err == nil && strings.TrimSpace(string(out)) == "true"}
+	}
+}
 
 type WelcomeModel struct {
 	width  int
@@ -59,13 +58,11 @@ type WelcomeModel struct {
 	cursor      int
 	menuItems   []menuItem
 
-	// enterPressed is a one-shot flag set when the user presses enter.
-	// The parent app reads it, acts on it, then resets the model — this avoids
-	// re-triggering transitions on every subsequent message.
 	enterPressed bool
 
 	workDir   string
 	ecosystem ecosystem.Ecosystem
+	hasGit    bool
 }
 
 type menuItem struct {
@@ -73,9 +70,12 @@ type menuItem struct {
 	action int
 }
 
-func buildMenuItems(eco ecosystem.Ecosystem, updateAvailable bool, latestVersion string) []menuItem {
+func buildMenuItems(eco ecosystem.Ecosystem, hasGit bool, updateAvailable bool, latestVersion string) []menuItem {
 	items := []menuItem{
 		{label: "Start a new project", action: MENU_NEW_PROJECT},
+	}
+	if hasGit {
+		items = append(items, menuItem{label: "Git configuration", action: MENU_GIT_CONFIG})
 	}
 	if eco.HasPackages() {
 		items = append(items, menuItem{label: "Browse packages", action: MENU_BROWSE_PACKAGES})
@@ -83,11 +83,15 @@ func buildMenuItems(eco ecosystem.Ecosystem, updateAvailable bool, latestVersion
 	if updateAvailable {
 		items = append(items, menuItem{label: fmt.Sprintf("Update to %s", latestVersion), action: MENU_UPDATE})
 	}
+	items = append(items, menuItem{label: "Settings", action: MENU_SETTINGS})
 	return items
 }
 
 func NewWelcome(width, height int) WelcomeModel {
-	dir, _ := os.Getwd()
+	dir, err := os.Getwd()
+	if err != nil {
+		dir = "."
+	}
 	eco := ecosystem.Detect(dir)
 	return WelcomeModel{
 		width:     width,
@@ -95,7 +99,7 @@ func NewWelcome(width, height int) WelcomeModel {
 		cursor:    0,
 		workDir:   dir,
 		ecosystem: eco,
-		menuItems: buildMenuItems(eco, false, ""),
+		menuItems: buildMenuItems(eco, false, false, ""),
 	}
 }
 
@@ -118,18 +122,18 @@ func uiRevealCmd() tea.Cmd {
 
 func checkUpdateCmd() tea.Cmd {
 	return func() tea.Msg {
-		ch := updater.Check()
+		ch := updater.Check(context.Background())
 		info := <-ch
 		return updateCheckMsg(info)
 	}
 }
 
 func (m WelcomeModel) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), checkUpdateCmd())
+	return tea.Batch(tickCmd(), checkUpdateCmd(), detectGitWelcomeCmd(m.workDir))
 }
 
 func (m WelcomeModel) skipAnimation() WelcomeModel {
-	m.currentLine = len(LOGO_LINES)
+	m.currentLine = len(cli.LogoLines)
 	m.charPos = 0
 	m.logoReady = true
 	m.uiReady = true
@@ -155,12 +159,12 @@ func (m WelcomeModel) Update(msg tea.Msg) (WelcomeModel, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.currentLine >= len(LOGO_LINES) {
+		if m.currentLine >= len(cli.LogoLines) {
 			m.logoReady = true
 			return m, uiRevealCmd()
 		}
 
-		lineLen := len([]rune(LOGO_LINES[m.currentLine]))
+		lineLen := len([]rune(cli.LogoLines[m.currentLine]))
 		m.charPos++
 
 		if m.charPos >= lineLen {
@@ -173,10 +177,13 @@ func (m WelcomeModel) Update(msg tea.Msg) (WelcomeModel, tea.Cmd) {
 	case updateCheckMsg:
 		m.updateInfo = updater.UpdateInfo(msg)
 		m.updateReady = true
-		m.menuItems = buildMenuItems(m.ecosystem, m.updateInfo.Available, m.updateInfo.LatestVersion)
+		m.menuItems = buildMenuItems(m.ecosystem, m.hasGit, m.updateInfo.Available, m.updateInfo.LatestVersion)
+
+	case gitDetectWelcomeMsg:
+		m.hasGit = msg.hasGit
+		m.menuItems = buildMenuItems(m.ecosystem, m.hasGit, m.updateInfo.Available, m.updateInfo.LatestVersion)
 
 	case uiRevealMsg:
-		// NOTE: guard against duplicate uiRevealMsg arriving after a skip
 		if !m.uiReady {
 			m.uiReady = true
 		}
@@ -200,10 +207,15 @@ func (m WelcomeModel) Update(msg tea.Msg) (WelcomeModel, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
-			// NOTE: set a one-shot flag — the parent reads it and resets the model
 			m.enterPressed = true
 		case "u":
-			// NOTE: update action will be handled by parent app model
+			for i, item := range m.menuItems {
+				if item.action == MENU_UPDATE {
+					m.cursor = i
+					m.enterPressed = true
+					break
+				}
+			}
 		}
 	}
 
@@ -215,13 +227,13 @@ func hyperlink(url, text string) string {
 }
 
 func renderLogoLine(lineIdx int, visible int) string {
-	runes := []rune(LOGO_LINES[lineIdx])
+	runes := []rune(cli.LogoLines[lineIdx])
 	total := len(runes)
 	if visible > total {
 		visible = total
 	}
 
-	color := LOGO_GRADIENT[lineIdx]
+	color := cli.LogoGradient[lineIdx]
 	rendered := lipgloss.NewStyle().Foreground(color).Bold(true).Render(string(runes[:visible]))
 
 	return rendered + strings.Repeat(" ", total-visible)
@@ -232,17 +244,14 @@ func (m WelcomeModel) View() string {
 
 	sb.WriteString("\n")
 
-	for i := range LOGO_LINES {
+	for i := range cli.LogoLines {
 		var visible int
 		switch {
 		case i < m.currentLine:
-			// Fully revealed line
-			visible = len([]rune(LOGO_LINES[i]))
+			visible = len([]rune(cli.LogoLines[i]))
 		case i == m.currentLine:
-			// Currently animating line
 			visible = m.charPos
 		default:
-			// Not yet reached — render blank placeholder
 			visible = 0
 		}
 
@@ -278,7 +287,6 @@ func (m WelcomeModel) View() string {
 		sb.WriteString("\n")
 	}
 
-	// Menu
 	for i, item := range m.menuItems {
 		if i == m.cursor {
 			cursor := styles.CursorStyle.Render("  ❯❯")
@@ -291,7 +299,6 @@ func (m WelcomeModel) View() string {
 
 	sb.WriteString("\n")
 
-	// Hints bar
 	hints := "  [↑↓] navigate   [↵] select   [q] quit"
 	if m.updateReady && m.updateInfo.Available {
 		hints = fmt.Sprintf(
@@ -308,6 +315,10 @@ func (m WelcomeModel) IsNewProjectSelected() bool {
 	return m.enterPressed && m.currentAction() == MENU_NEW_PROJECT
 }
 
+func (m WelcomeModel) IsGitConfigSelected() bool {
+	return m.enterPressed && m.currentAction() == MENU_GIT_CONFIG
+}
+
 func (m WelcomeModel) IsBrowsePackagesSelected() bool {
 	return m.enterPressed && m.currentAction() == MENU_BROWSE_PACKAGES
 }
@@ -316,7 +327,16 @@ func (m WelcomeModel) IsUpdateSelected() bool {
 	return m.enterPressed && m.currentAction() == MENU_UPDATE
 }
 
-// ConsumeEnter resets the one-shot enterPressed flag after the parent has acted on it.
+func (m WelcomeModel) IsSettingsSelected() bool {
+	return m.enterPressed && m.currentAction() == MENU_SETTINGS
+}
+
+func (m WelcomeModel) WorkDir() string { return m.workDir }
+
+func (m WelcomeModel) Ecosystem() ecosystem.Ecosystem { return m.ecosystem }
+
+func (m WelcomeModel) LatestVersion() string { return m.updateInfo.LatestVersion }
+
 func (m *WelcomeModel) ConsumeEnter() {
 	m.enterPressed = false
 }

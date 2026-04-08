@@ -1,45 +1,21 @@
 package trends
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/slouowzee/kapi/internal/semver"
 )
 
-func semverGreater(a, b string) bool {
-	partsA := strings.Split(strings.TrimPrefix(a, "v"), ".")
-	partsB := strings.Split(strings.TrimPrefix(b, "v"), ".")
-	maxLen := len(partsA)
-	if len(partsB) > maxLen {
-		maxLen = len(partsB)
-	}
-	for i := 0; i < maxLen; i++ {
-		var sa, sb string
-		if i < len(partsA) {
-			sa = partsA[i]
-		}
-		if i < len(partsB) {
-			sb = partsB[i]
-		}
-		na, errA := strconv.Atoi(sa)
-		nb, errB := strconv.Atoi(sb)
-		if errA == nil && errB == nil {
-			if na != nb {
-				return na > nb
-			}
-		} else if sa != sb {
-			return sa > sb
-		}
-	}
-	return false
-}
+const fetchTimeout = 5 * time.Second
+const starsCacheTTL = 1 * time.Hour
 
-const FETCH_TIMEOUT = 5 * time.Second
-const STARS_CACHE_TTL = 1 * time.Hour
+var httpClient = &http.Client{Timeout: fetchTimeout}
 
 type starsEntry struct {
 	stars     int64
@@ -58,14 +34,15 @@ type Stats struct {
 	Err             error
 }
 
-func Fetch(npmPackage, packagistPackage, githubRepo string, githubToken string) Stats {
-	client := &http.Client{Timeout: FETCH_TIMEOUT}
+func Fetch(ctx context.Context, npmPackage, packagistPackage, githubRepo string, githubToken string) Stats {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
 
 	var stats Stats
 
 	switch {
 	case npmPackage != "":
-		dl, ver, err := fetchNpm(client, npmPackage)
+		dl, ver, err := fetchNpm(ctx, npmPackage)
 		if err != nil {
 			stats.Err = err
 		} else {
@@ -73,7 +50,7 @@ func Fetch(npmPackage, packagistPackage, githubRepo string, githubToken string) 
 			stats.LatestVersion = ver
 		}
 	case packagistPackage != "":
-		dl, ver, err := fetchPackagist(client, packagistPackage)
+		dl, ver, err := fetchPackagist(ctx, packagistPackage)
 		if err != nil {
 			stats.Err = err
 		} else {
@@ -83,7 +60,7 @@ func Fetch(npmPackage, packagistPackage, githubRepo string, githubToken string) 
 	}
 
 	if githubRepo != "" {
-		stars, err := fetchGithubStars(client, githubRepo, githubToken)
+		stars, err := fetchGithubStars(ctx, githubRepo, githubToken)
 		if err != nil && stats.Err == nil {
 			stats.Err = err
 		} else {
@@ -94,14 +71,14 @@ func Fetch(npmPackage, packagistPackage, githubRepo string, githubToken string) 
 	return stats
 }
 
-func fetchNpm(client *http.Client, pkg string) (int64, string, error) {
+func fetchNpm(ctx context.Context, pkg string) (int64, string, error) {
 	encoded := strings.ReplaceAll(pkg, "/", "%2F")
 
 	dlURL := fmt.Sprintf("https://api.npmjs.org/downloads/point/last-week/%s", encoded)
 	var dlResp struct {
 		Downloads int64 `json:"downloads"`
 	}
-	if err := getJSON(client, dlURL, &dlResp); err != nil {
+	if err := getJSON(ctx, dlURL, &dlResp); err != nil {
 		return 0, "", err
 	}
 
@@ -109,14 +86,14 @@ func fetchNpm(client *http.Client, pkg string) (int64, string, error) {
 	var metaResp struct {
 		Version string `json:"version"`
 	}
-	if err := getJSON(client, metaURL, &metaResp); err != nil {
+	if err := getJSON(ctx, metaURL, &metaResp); err != nil {
 		return dlResp.Downloads, "", err
 	}
 
 	return dlResp.Downloads, metaResp.Version, nil
 }
 
-func fetchPackagist(client *http.Client, pkg string) (int64, string, error) {
+func fetchPackagist(ctx context.Context, pkg string) (int64, string, error) {
 	url := fmt.Sprintf("https://packagist.org/packages/%s.json", pkg)
 
 	var resp struct {
@@ -129,14 +106,14 @@ func fetchPackagist(client *http.Client, pkg string) (int64, string, error) {
 			} `json:"versions"`
 		} `json:"package"`
 	}
-	if err := getJSON(client, url, &resp); err != nil {
+	if err := getJSON(ctx, url, &resp); err != nil {
 		return 0, "", err
 	}
 
 	latest := ""
 	for v := range resp.Package.Versions {
 		if !strings.Contains(v, "dev") && !strings.HasPrefix(v, "v0.") {
-			if latest == "" || semverGreater(v, latest) {
+			if latest == "" || semver.Greater(v, latest) {
 				latest = v
 			}
 		}
@@ -145,9 +122,9 @@ func fetchPackagist(client *http.Client, pkg string) (int64, string, error) {
 	return resp.Package.Downloads.Total, latest, nil
 }
 
-func fetchGithubStars(client *http.Client, repo string, token string) (int64, error) {
+func fetchGithubStars(ctx context.Context, repo string, token string) (int64, error) {
 	starsCacheMu.Lock()
-	if entry, ok := starsCache[repo]; ok && time.Since(entry.fetchedAt) < STARS_CACHE_TTL {
+	if entry, ok := starsCache[repo]; ok && time.Since(entry.fetchedAt) < starsCacheTTL {
 		starsCacheMu.Unlock()
 		return entry.stars, nil
 	}
@@ -155,7 +132,7 @@ func fetchGithubStars(client *http.Client, repo string, token string) (int64, er
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s", repo)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -165,7 +142,7 @@ func fetchGithubStars(client *http.Client, repo string, token string) (int64, er
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -189,15 +166,15 @@ func fetchGithubStars(client *http.Client, repo string, token string) (int64, er
 	return payload.Stars, nil
 }
 
-func getJSON(client *http.Client, url string, dest any) error {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func getJSON(ctx context.Context, url string, dest any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "kapi-cli")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

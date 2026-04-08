@@ -1,12 +1,14 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/slouowzee/kapi/internal/config"
+	"github.com/slouowzee/kapi/internal/ecosystem"
 	"github.com/slouowzee/kapi/internal/registry"
 	"github.com/slouowzee/kapi/internal/trends"
 	"github.com/slouowzee/kapi/tui/styles"
@@ -31,7 +33,7 @@ func loadFrameworksCmd() tea.Cmd {
 
 func loadTrendsCmd(fw registry.Framework) tea.Cmd {
 	return func() tea.Msg {
-		stats := trends.Fetch(fw.NpmPackage, fw.PackagistPackage, fw.GithubRepo, config.GithubToken())
+		stats := trends.Fetch(context.Background(), fw.NpmPackage, fw.PackagistPackage, fw.GithubRepo, config.GithubToken())
 		return trendsLoadedMsg{frameworkID: fw.ID, stats: stats}
 	}
 }
@@ -57,19 +59,18 @@ type FrameworkModel struct {
 	selected registry.Framework
 	done     bool
 
-	// backPressed is a one-shot flag set when the user presses esc.
 	backPressed bool
 }
 
-func NewFramework(width, height int, ecosystemIdx int, targetDir string) FrameworkModel {
-	eco := "php"
-	if ecosystemIdx == 1 {
-		eco = "js"
+func NewFramework(width, height int, eco ecosystem.Ecosystem, targetDir string) FrameworkModel {
+	ecoStr := "php"
+	if eco == ecosystem.ECOSYSTEM_JS {
+		ecoStr = "js"
 	}
 	return FrameworkModel{
 		width:      width,
 		height:     height,
-		ecosystem:  eco,
+		ecosystem:  ecoStr,
 		targetDir:  targetDir,
 		loading:    true,
 		statsCache: make(map[string]trends.Stats),
@@ -214,11 +215,11 @@ func (m FrameworkModel) View() string {
 		return sb.String()
 	}
 
-	leftCol := m.renderList()
-	rightCol := m.renderStats()
-
 	listWidth, panelWidth := layoutWidths(m.width)
 	boxHeight := 13
+
+	leftCol := m.renderList(listWidth)
+	rightCol := m.renderStats()
 
 	leftStyle := lipgloss.NewStyle().
 		Width(listWidth).
@@ -257,10 +258,9 @@ func (m FrameworkModel) View() string {
 	return sb.String()
 }
 
-func (m FrameworkModel) renderList() string {
+func (m FrameworkModel) renderList(listWidth int) string {
 	var sb strings.Builder
 
-	listWidth, _ := layoutWidths(m.width)
 	sepWidth := listWidth
 
 	if m.query == "" {
@@ -289,20 +289,7 @@ func (m FrameworkModel) renderList() string {
 	const VISIBLE = 9
 	total := len(m.visible)
 
-	windowStart := m.cursor - VISIBLE/2
-	if windowStart < 0 {
-		windowStart = 0
-	}
-	if windowStart+VISIBLE > total {
-		windowStart = total - VISIBLE
-	}
-	if windowStart < 0 {
-		windowStart = 0
-	}
-	windowEnd := windowStart + VISIBLE
-	if windowEnd > total {
-		windowEnd = total
-	}
+	windowStart, windowEnd := scrollWindow(m.cursor, total, VISIBLE)
 
 	if windowStart > 0 {
 		sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↑ %d more", windowStart)) + "\n")
@@ -389,9 +376,6 @@ func formatNum(n int64) string {
 	}
 }
 
-// fuzzyFilter returns frameworks matching the query against name and tags only.
-// It first tries a case-insensitive substring match on the name, then falls back
-// to a Levenshtein distance check to tolerate typos (e.g. "laravl" → Laravel).
 func fuzzyFilter(frameworks []registry.Framework, query string) []registry.Framework {
 	if query == "" {
 		return frameworks
