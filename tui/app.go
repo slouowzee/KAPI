@@ -53,6 +53,7 @@ type App struct {
 	selectedPM        packagemanager.PM
 	selectedGit       screens.GitConfig
 
+	cdDir      string
 	browseMode bool
 	editMode   bool
 }
@@ -455,6 +456,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if updated.HasErr() {
 				return a, cmd
 			}
+			if updated.CdRequested() {
+				a.cdDir = a.selectedDir
+			}
 			return a, tea.Quit
 		}
 		return a, cmd
@@ -503,6 +507,8 @@ func (a App) goToRecap() (App, tea.Cmd) {
 	})
 	return a, a.recap.Init()
 }
+
+func (a App) FinalDir() string { return a.cdDir }
 
 func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 	switch eco {

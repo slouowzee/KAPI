@@ -41,10 +41,14 @@ type ExecModel struct {
 	dirExistedBefore bool
 	preDirEntries    []string
 
-	cleaningUp    bool
-	done          bool
-	lastErr       error
-	returnToRecap bool
+	shellWrapperActive bool
+	cleaningUp         bool
+	promptCD           bool
+	cdCursor           int
+	cdRequested        bool
+	done               bool
+	lastErr            error
+	returnToRecap      bool
 }
 
 type streamResult struct {
@@ -55,10 +59,11 @@ type streamResult struct {
 
 func NewExec(width, height int, steps []ExecStep, targetDir string) ExecModel {
 	m := ExecModel{
-		width:     width,
-		height:    height,
-		steps:     steps,
-		targetDir: targetDir,
+		width:              width,
+		height:             height,
+		steps:              steps,
+		targetDir:          targetDir,
+		shellWrapperActive: os.Getenv("KAPI_SHELL_WRAPPER") == "1",
 	}
 
 	if targetDir != "" {
@@ -84,6 +89,7 @@ func (m *ExecModel) SetSize(width, height int) {
 func (m ExecModel) Done() bool                { return m.done }
 func (m ExecModel) HasErr() bool              { return m.lastErr != nil }
 func (m ExecModel) Err() error                { return m.lastErr }
+func (m ExecModel) CdRequested() bool         { return m.cdRequested }
 func (m ExecModel) ShouldReturnToRecap() bool { return m.returnToRecap }
 func (m *ExecModel) ConsumeReturnToRecap()    { m.returnToRecap = false }
 
@@ -109,6 +115,10 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		m.streamChan = msg.ch
 		return m, m.readOneResult()
 
+	case execAllDoneMsg:
+		m.promptCD = true
+		return m, nil
+
 	case execStepDoneMsg:
 		m.streamChan = nil
 		if msg.err != nil {
@@ -122,7 +132,6 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		}
 		m.current++
 		if m.current >= len(m.steps) {
-			m.done = true
 			return m, func() tea.Msg { return execAllDoneMsg{} }
 		}
 		if len(m.outputLines) > 0 {
@@ -136,6 +145,34 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.promptCD {
+			if !m.shellWrapperActive {
+				// No wrapper: any key quits
+				switch msg.String() {
+				case " ", "enter", "esc", "q":
+					m.done = true
+				}
+				break
+			}
+			switch msg.String() {
+			case "up", "k", "left", "h":
+				if m.cdCursor > 0 {
+					m.cdCursor--
+				}
+			case "down", "j", "right", "l":
+				if m.cdCursor < 1 {
+					m.cdCursor++
+				}
+			case " ", "enter":
+				if m.cdCursor == 0 {
+					m.cdRequested = true
+				}
+				m.done = true
+			case "esc":
+				m.done = true
+			}
+			break
+		}
 		if !m.done || m.cleaningUp {
 			break
 		}
@@ -274,13 +311,38 @@ func (m ExecModel) View() string {
 	case m.done && m.lastErr != nil:
 		sb.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  ✗ Error: %s", m.lastErr)) + "\n")
 		sb.WriteString(styles.MutedStyle.Render("  [↵] back to summary") + "\n")
+	case m.promptCD:
+		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
+		sb.WriteString("\n")
+		if m.shellWrapperActive {
+			cdOpts := []string{"cd into project", "quit"}
+			var optStr strings.Builder
+			for i, opt := range cdOpts {
+				if i > 0 {
+					optStr.WriteString(styles.DimStyle.Render("  ·  "))
+				}
+				if i == m.cdCursor {
+					optStr.WriteString(styles.SelectedStyle.Render(opt))
+				} else {
+					optStr.WriteString(styles.DimStyle.Render(opt))
+				}
+			}
+			sb.WriteString(fmt.Sprintf("%s%s\n",
+				styles.CursorStyle.Render("  ❯❯"),
+				styles.SelectedStyle.Render("  ")+optStr.String(),
+			))
+			sb.WriteString("\n")
+			sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm") + "\n")
+		} else {
+			sb.WriteString(styles.MutedStyle.Render("  [↵] quit") + "\n")
+		}
 	case m.done:
 		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
 	default:
 		sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("  Step %d / %d", m.current+1, len(m.steps))) + "\n")
 	}
 
-	if len(m.outputLines) > 0 {
+	if len(m.outputLines) > 0 && !m.promptCD {
 		sb.WriteString("\n")
 		sb.WriteString(m.renderOutputPanel() + "\n")
 	}
@@ -305,17 +367,13 @@ func (m ExecModel) renderOutputPanel() string {
 		lines = lines[len(lines)-vis:]
 	}
 
-	// hMargin: indent applied on each side, mirroring the UI's left margin.
-	// Width() sets content+padding; borders (+2 chars) render outside it, so:
-	//   hMargin + (panelWidth + 2) + hMargin = m.width
-	//   panelWidth = m.width - 2*hMargin - 2
 	const hMargin = 2
 	panelWidth := m.width - 2*hMargin - 2
 	if panelWidth < 40 {
 		panelWidth = 40
 	}
 
-	inner := panelWidth - 2 // Padding(0,1) consumes 1 char on each side
+	inner := panelWidth - 2
 	rendered := make([]string, len(lines))
 	for i, l := range lines {
 		if len(l) > inner {
