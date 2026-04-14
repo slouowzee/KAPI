@@ -262,7 +262,7 @@ func (m WelcomeModel) View() string {
 			row := lipgloss.JoinHorizontal(lipgloss.Top, rendered, "   ", githubLink)
 			sb.WriteString(row + "\n")
 		} else if i == 3 && m.uiReady {
-			row := lipgloss.JoinHorizontal(lipgloss.Top, rendered, "   ", styles.MutedStyle.Render(LOGO_SUBTITLE))
+			row := lipgloss.JoinHorizontal(lipgloss.Top, rendered, "   ", styles.MutedStyle.Render(LOGO_SUBTITLE), " ", styles.DimStyle.Render(updater.CurrentVersion))
 			sb.WriteString(row + "\n")
 		} else {
 			sb.WriteString(rendered + "\n")
