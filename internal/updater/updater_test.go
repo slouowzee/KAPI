@@ -85,7 +85,7 @@ func TestCheckLatestVersion_HTTPError(t *testing.T) {
 func TestCheckLatestVersion_InvalidJSON(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
