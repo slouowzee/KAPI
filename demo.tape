@@ -4,7 +4,7 @@
 
 Output .github/assets/demo.gif
 
-Require kapi
+Require ./kapi
 
 Set Margin 20
 Set MarginFill "#674EFF"
@@ -16,7 +16,7 @@ Set Width 1200
 Set Height 800
 Set TypingSpeed 0.1
 
-Type "kapi"
+Type "./kapi"
 Sleep 500ms
 Enter
 
