@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	CurrentVersion   = "v1.0.0"
-	githubReleaseURL = "https://api.github.com/repos/slouowzee/KAPI/releases/latest"
+	CurrentVersion   = "v1.0.0-beta.1"
+	githubReleaseURL = "https://api.github.com/repos/slouowzee/kapi/releases/latest"
 )
 
 type Release struct {
