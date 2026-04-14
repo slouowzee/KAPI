@@ -5,6 +5,8 @@ Set Height 800
 Set Theme "Catppuccin Mocha"
 
 Hide
+Type "alias kapi='./kapi'"
+Enter
 Type "clear"
 Enter
 Show
