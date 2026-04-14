@@ -26,12 +26,17 @@ Sleep 1.5s
 Enter
 
 Sleep 1.5s
+Ctrl+W
+Sleep 1.5s
 Type "testkapi"
 Sleep 1.5s
 Enter
 
 Sleep 1.5s
-Enter 2
+Enter
+
+Sleep 1.5s
+Enter
 
 Sleep 2s
 Space
