@@ -13,6 +13,10 @@ Are you wondering what KAPI is? Well, if I tried to enumerate every single featu
 
 ---
 
+<p align="center">
+  <img src=".github/assets/demo.gif" alt="KAPI in action" width="800" />
+</p>
+
 ## Features
 
 - **Available Environments**: Out-of-the-box support for **JavaScript/TypeScript** and **PHP**, automatically handling their specific package managers (`npm`, `bun`, `composer`, etc.).

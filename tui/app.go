@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
@@ -29,6 +28,7 @@ const (
 	ScreenGitConfig
 	ScreenSettings
 	ScreenExec
+	ScreenUpdateInfo
 )
 
 type App struct {
@@ -46,6 +46,7 @@ type App struct {
 	gitConfig screens.GitConfigModel
 	settings  screens.SettingsModel
 	exec      screens.ExecModel
+	update    screens.UpdateInfoModel
 
 	selectedDir       string
 	selectedEcosystem ecosystem.Ecosystem
@@ -103,6 +104,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.settings.SetSize(msg.Width, msg.Height)
 		case ScreenExec:
 			a.exec.SetSize(msg.Width, msg.Height)
+		case ScreenUpdateInfo:
+			a.update.SetSize(msg.Width, msg.Height)
 		}
 
 	case tea.KeyMsg:
@@ -172,14 +175,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if latest == "" {
 				latest = "latest"
 			}
-			installCmd := execCmd("", "go", "install",
-				"github.com/slouowzee/kapi@"+latest)
-			a.screen = ScreenExec
-			a.exec = screens.NewExec(a.width, a.height, []screens.ExecStep{{
-				Label: "go install github.com/slouowzee/kapi@" + latest,
-				Cmd:   installCmd,
-			}}, "")
-			return a, a.exec.Init()
+			a.screen = ScreenUpdateInfo
+			a.update = screens.NewUpdateInfo(a.width, a.height, latest)
+			return a, a.update.Init()
 		}
 		return a, cmd
 
@@ -467,6 +465,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		}
 		return a, cmd
+
+	case ScreenUpdateInfo:
+		updated, cmd := a.update.Update(msg)
+		a.update = updated
+
+		if updated.IsDone() {
+			a.update.ConsumeDone()
+			a.screen = ScreenWelcome
+			return a, nil
+		}
+		return a, cmd
 	}
 
 	return a, nil
@@ -496,6 +505,8 @@ func (a App) View() string {
 		return a.settings.View()
 	case ScreenExec:
 		return a.exec.View()
+	case ScreenUpdateInfo:
+		return a.update.View()
 	}
 	return ""
 }
@@ -526,13 +537,3 @@ func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 	}
 }
 
-func execCmd(dir string, name string, args ...string) *exec.Cmd {
-	c := exec.Command(name, args...)
-	if dir != "" {
-		c.Dir = dir
-	}
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	return c
-}

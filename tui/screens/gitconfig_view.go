@@ -255,9 +255,9 @@ func (m GitConfigModel) renderKeyEntries(keys []string, cursor int, format, genL
 			}
 		}
 		if i == cursor {
-			sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(display)))
+			fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(display))
 		} else {
-			sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(display)))
+			fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(display))
 		}
 	}
 	return sb.String()
@@ -271,20 +271,20 @@ func (m GitConfigModel) renderFormatList(cursor int, avail []bool) string {
 	for i, opt := range signingFormats {
 		switch {
 		case !avail[i] && i == cursor:
-			sb.WriteString(fmt.Sprintf("%s%s %s\n",
+			fmt.Fprintf(&sb, "%s%s %s\n",
 				styles.CursorStyle.Render("    ❯❯ "),
 				styles.DimStyle.Render(opt),
 				styles.DimStyle.Render(formatUnavail[i]),
-			))
+			)
 		case !avail[i]:
-			sb.WriteString(fmt.Sprintf("       %s %s\n",
+			fmt.Fprintf(&sb, "       %s %s\n",
 				styles.DimStyle.Render(opt),
 				styles.DimStyle.Render(formatUnavail[i]),
-			))
+			)
 		case i == cursor:
-			sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt)))
+			fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
 		default:
-			sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(opt)))
+			fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
 		}
 	}
 	return sb.String()
@@ -340,28 +340,28 @@ func (m GitConfigModel) View() string {
 			}
 			switch {
 			case disabled && i == m.menuCursor:
-				sb.WriteString(fmt.Sprintf("%s%s %s\n",
+				fmt.Fprintf(&sb, "%s%s %s\n",
 					styles.CursorStyle.Render("    ❯❯ "),
 					styles.DimStyle.Render(item),
 					styles.DimStyle.Render("(token scope required)"),
-				))
+				)
 			case disabled:
-				sb.WriteString(fmt.Sprintf("       %s %s\n",
+				fmt.Fprintf(&sb, "       %s %s\n",
 					styles.DimStyle.Render(item),
 					styles.DimStyle.Render("(token scope required)"),
-				))
+				)
 			case i == m.menuCursor:
 				line := item
 				if hint != "" {
 					line += styles.DimStyle.Render(hint)
 				}
-				sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(line)))
+				fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(line))
 			default:
 				line := styles.DimStyle.Render(item)
 				if hint != "" {
 					line += styles.DimStyle.Render(hint)
 				}
-				sb.WriteString(fmt.Sprintf("       %s\n", line))
+				fmt.Fprintf(&sb, "       %s\n", line)
 			}
 		}
 		if m.scopesFetched && (m.isActionDisabled(GITCFG_ACTION_SIGNING) || !m.scopes.Repo) {
@@ -382,15 +382,15 @@ func (m GitConfigModel) View() string {
 		for i, opt := range opts {
 			if (i == 0 || i == 1) && !m.scopes.Repo {
 				if i == m.remoteMenuCursor {
-					sb.WriteString(fmt.Sprintf("%s%s %s\n", styles.CursorStyle.Render("    ❯❯ "), styles.DimStyle.Render(opt), styles.DimStyle.Render("(requires 'repo' scope)")))
+					fmt.Fprintf(&sb, "%s%s %s\n", styles.CursorStyle.Render("    ❯❯ "), styles.DimStyle.Render(opt), styles.DimStyle.Render("(requires 'repo' scope)"))
 				} else {
-					sb.WriteString(fmt.Sprintf("       %s %s\n", styles.DimStyle.Render(opt), styles.DimStyle.Render("(requires 'repo' scope)")))
+					fmt.Fprintf(&sb, "       %s %s\n", styles.DimStyle.Render(opt), styles.DimStyle.Render("(requires 'repo' scope)"))
 				}
 			} else {
 				if i == m.remoteMenuCursor {
-					sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt)))
+					fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
 				} else {
-					sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(opt)))
+					fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
 				}
 			}
 		}
@@ -428,9 +428,9 @@ func (m GitConfigModel) View() string {
 			sb.WriteString(styles.SelectedStyle.Render("  "+questionPrompt(q)) + "\n")
 			for i, opt := range []string{"Yes", "No"} {
 				if i == m.collabCursor {
-					sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt)))
+					fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
 				} else {
-					sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(opt)))
+					fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
 				}
 			}
 		}
@@ -442,9 +442,9 @@ func (m GitConfigModel) View() string {
 		sb.WriteString(styles.DimStyle.Render("    (Automated linting and testing pipelines)") + "\n")
 		for i, opt := range ciOptions {
 			if i == m.ciCursor {
-				sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt)))
+				fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
 			} else {
-				sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(opt)))
+				fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
 			}
 		}
 		sb.WriteString("\n")
@@ -498,9 +498,9 @@ func (m GitConfigModel) View() string {
 		sb.WriteString(styles.SelectedStyle.Render("  Apply signing to:") + "\n")
 		for i, opt := range signingScopes {
 			if i == m.signingScopeCursor {
-				sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt)))
+				fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
 			} else {
-				sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(opt)))
+				fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
 			}
 		}
 		sb.WriteString("\n")
@@ -556,9 +556,9 @@ func (m GitConfigModel) View() string {
 		opts := []string{"No, keep it", "Yes, delete it"}
 		for i, opt := range opts {
 			if i == m.manageDeleteCursor {
-				sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt)))
+				fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
 			} else {
-				sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(opt)))
+				fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
 			}
 		}
 		sb.WriteString("\n")

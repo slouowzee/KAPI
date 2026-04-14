@@ -252,13 +252,13 @@ func (m FolderModel) View() string {
 				if i == MENU_ITEM_CURRENT {
 					label += styles.DimStyle.Render("   "+dirLabel) + ecoBadge
 				}
-				sb.WriteString(fmt.Sprintf("%s%s\n", cur, label))
+				fmt.Fprintf(&sb, "%s%s\n", cur, label)
 			} else {
 				line := item
 				if i == MENU_ITEM_CURRENT {
 					line += fmt.Sprintf("   %s%s", styles.DimStyle.Render(dirLabel), ecoBadge)
 				}
-				sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(line)))
+				fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render(line))
 			}
 		}
 
@@ -308,9 +308,9 @@ func (m FolderModel) View() string {
 				name := filepath.Base(sug)
 				if absIdx == m.sugCursor {
 					cur := lipgloss.NewStyle().Foreground(styles.COLOR_PRIMARY).Bold(true).Render("  ❯❯")
-					sb.WriteString(fmt.Sprintf("%s %s\n", cur, styles.SelectedStyle.Render(name)))
+					fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render(name))
 				} else {
-					sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(name)))
+					fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render(name))
 				}
 			}
 

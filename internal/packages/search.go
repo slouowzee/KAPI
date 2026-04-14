@@ -79,7 +79,7 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var meta struct {
 		Version     string `json:"version"`
@@ -117,7 +117,7 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 						pkg.Weekly = dl.Downloads
 					}
 				}
-				dlResp.Body.Close()
+				_ = dlResp.Body.Close()
 			}
 		}
 	}
@@ -136,7 +136,7 @@ func enrichPackagist(ctx context.Context, client *http.Client, pkg *Package) {
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var meta struct {
 		Package struct {
@@ -221,7 +221,7 @@ func SearchNpm(ctx context.Context, query string) ([]Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("npm search: HTTP %d", resp.StatusCode)
@@ -275,7 +275,7 @@ func SearchPackagist(ctx context.Context, query string) ([]Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("packagist search: HTTP %d", resp.StatusCode)

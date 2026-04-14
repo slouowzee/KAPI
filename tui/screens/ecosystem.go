@@ -106,9 +106,9 @@ func (m EcosystemModel) View() string {
 			cur := styles.CursorStyle.Render("  ❯❯")
 			label := styles.SelectedStyle.Render(" " + item.label)
 			desc := styles.DimStyle.Render("   " + item.desc)
-			sb.WriteString(fmt.Sprintf("%s%s%s\n", cur, label, desc))
+			fmt.Fprintf(&sb, "%s%s%s\n", cur, label, desc)
 		} else {
-			sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(item.label)))
+			fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render(item.label))
 		}
 	}
 

@@ -270,7 +270,7 @@ func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
 		if err != nil {
 			return gitcfgExecMsg{err: fmt.Errorf("could not create repo on GitHub: %w", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -464,7 +464,7 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 		if err != nil {
 			return gitcfgGithubPushDoneMsg{err: fmt.Errorf("could not push key to GitHub: %w", err)}
 		}
-		defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
+		defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusUnprocessableEntity {
 			return gitcfgGithubPushDoneMsg{err: fmt.Errorf("failed to push key (HTTP %d)", resp.StatusCode)}

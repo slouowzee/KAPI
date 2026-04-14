@@ -47,7 +47,7 @@ func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
 	if err != nil {
 		return TokenScopes{}, fmt.Errorf("fetch GitHub scopes: %w", err)
 	}
-	defer func() { _, _ = io.Copy(io.Discard, resp.Body); resp.Body.Close() }()
+	defer func() { _, _ = io.Copy(io.Discard, resp.Body); _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return TokenScopes{}, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)

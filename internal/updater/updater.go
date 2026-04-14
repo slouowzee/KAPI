@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	CurrentVersion   = "v1.0.0"
-	githubReleaseURL = "https://api.github.com/repos/slouowzee/KAPI/releases/latest"
+	CurrentVersion   = "v1.0.0-beta.1"
+	githubReleaseURL = "https://api.github.com/repos/slouowzee/kapi/releases/latest"
 )
 
 type Release struct {
@@ -44,7 +44,7 @@ func checkLatestVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)

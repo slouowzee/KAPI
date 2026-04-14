@@ -38,7 +38,7 @@ func createGithubRepo(ctx context.Context, name string, private bool) (sshURL st
 	if err != nil {
 		return "", fmt.Errorf("GitHub API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("could not read GitHub API response: %w", err)

@@ -119,14 +119,9 @@ stars, err := fetchGithubStars(ctx, repo, token)
 Before opening a PR, make sure:
 
 ```bash
-go build ./...        # must compile without errors
-go test ./...         # all tests must pass
-go vet ./...          # no vet warnings
-```
-
-If `staticcheck` is available:
-```bash
-staticcheck ./...     # no warnings
+make build        # must compile without errors
+make test         # all tests must pass
+make lint         # no linter warnings (requires golangci-lint)
 ```
 
 - Do **not** use `panic` outside of truly unrecoverable situations — return errors instead
@@ -144,7 +139,7 @@ cd kapi
 git checkout dev
 git checkout -b feat/your-feature
 # ... do your work ...
-go test ./...
+make test
 git commit -m "feat: add your feature" -m "explain the why, not the what"
 git push origin feat/your-feature
 # then open a PR on GitHub targeting dev

@@ -176,7 +176,7 @@ func TestFetchTokenScopes_AllScopes(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-OAuth-Scopes", "repo, write:public_key, write:gpg_key")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -198,7 +198,7 @@ func TestFetchTokenScopes_AdminScopeAliases(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-OAuth-Scopes", "admin:public_key, admin:gpg_key")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -219,7 +219,7 @@ func TestFetchTokenScopes_OnlyRepo(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-OAuth-Scopes", "repo")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -240,7 +240,7 @@ func TestFetchTokenScopes_EmptyScopeHeader(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -277,7 +277,7 @@ func TestFetchTokenScopes_BearerAuth(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("X-OAuth-Scopes", "repo")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)

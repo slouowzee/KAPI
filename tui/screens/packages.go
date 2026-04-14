@@ -455,9 +455,9 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 				cur = styles.CursorStyle.Render(" ❯❯")
 			}
 			label := styles.SelectedStyle.Render(" " + pkg.Name)
-			sb.WriteString(fmt.Sprintf("%s %s%s\n", cur, checkbox, label))
+			fmt.Fprintf(&sb, "%s %s%s\n", cur, checkbox, label)
 		} else {
-			sb.WriteString(fmt.Sprintf("     %s %s\n", checkbox, styles.DimStyle.Render(pkg.Name)))
+			fmt.Fprintf(&sb, "     %s %s\n", checkbox, styles.DimStyle.Render(pkg.Name))
 		}
 	}
 
@@ -471,22 +471,16 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 func (m PackagesModel) renderDetail(panelWidth int) string {
 	var sb strings.Builder
 
-	detailLines := 0
 	pkg, ok := m.currentPackage()
 	if ok {
 		sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")
-		detailLines++
 		sb.WriteString(styles.DimStyle.Render(pkg.Description) + "\n")
-		detailLines++
 		sb.WriteString("\n")
-		detailLines++
 		if pkg.Version != "" {
 			sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(pkg.Version) + "\n")
-			detailLines++
 		}
 		if pkg.Stars > 0 {
 			sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(pkg.Stars)) + "\n")
-			detailLines++
 		}
 		if pkg.Weekly > 0 {
 			label := "Weekly   "
@@ -494,15 +488,12 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 				label = "Total    "
 			}
 			sb.WriteString(styles.MutedStyle.Render(label) + styles.MutedStyle.Render(formatNum(pkg.Weekly)) + "\n")
-			detailLines++
 		}
 		if pkg.GithubRepo != "" {
 			sb.WriteString("\n" + styles.LinkStyle.Render("github.com/"+pkg.GithubRepo) + "\n")
-			detailLines += 2
 		}
 	} else {
 		sb.WriteString(styles.DimStyle.Render("No package selected") + "\n")
-		detailLines++
 	}
 
 	sb.WriteString("\n")
@@ -530,7 +521,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 			absIdx := windowStart + i
 			if m.focusCart && absIdx == m.cartCursor {
 				cur := styles.CursorStyle.Render(" ❯")
-				sb.WriteString(fmt.Sprintf("%s %s\n", cur, styles.SelectedStyle.Render(p.Name)))
+				fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render(p.Name))
 			} else {
 				sb.WriteString(styles.SelectedStyle.Render("  · ") + styles.DimStyle.Render(p.Name) + "\n")
 			}
