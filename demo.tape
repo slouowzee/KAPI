@@ -6,17 +6,19 @@ Output .github/assets/demo.gif
 
 Require ./kapi
 
-Set Margin 20
-Set MarginFill "#674EFF"
-Set BorderRadius 10
-Set WindowBar Rings
-
 Set FontSize 18
 Set Width 1200
 Set Height 800
 Set TypingSpeed 0.1
 
-Type "./kapi"
+Hide
+Type "alias kapi='./kapi'"
+Enter
+Type "clear"
+Enter
+Show
+
+Type "kapi"
 Sleep 500ms
 Enter
 
