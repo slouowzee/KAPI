@@ -300,9 +300,9 @@ func (m FrameworkModel) renderList(listWidth int) string {
 		if absIdx == m.cursor {
 			cur := styles.CursorStyle.Render(" ❯❯")
 			label := styles.SelectedStyle.Render(" " + fw.Name)
-			sb.WriteString(fmt.Sprintf("%s%s\n", cur, label))
+			fmt.Fprintf(&sb, "%s%s\n", cur, label)
 		} else {
-			sb.WriteString(fmt.Sprintf("    %s\n", styles.DimStyle.Render(fw.Name)))
+			fmt.Fprintf(&sb, "    %s\n", styles.DimStyle.Render(fw.Name))
 		}
 	}
 

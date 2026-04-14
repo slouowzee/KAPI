@@ -255,7 +255,7 @@ func (m GitConfigModel) renderKeyEntries(keys []string, cursor int, format, genL
 			}
 		}
 		if i == cursor {
-			sb.WriteString(fmt.Sprintf("%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(display)))
+			fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(display))
 		} else {
 			sb.WriteString(fmt.Sprintf("       %s\n", styles.DimStyle.Render(display)))
 		}
