@@ -175,7 +175,7 @@ func TestFetchTokenScopes_AllScopes(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-OAuth-Scopes", "repo, write:public_key, write:gpg_key")
-		_, _ = w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
@@ -197,7 +197,7 @@ func TestFetchTokenScopes_AdminScopeAliases(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-OAuth-Scopes", "admin:public_key, admin:gpg_key")
-		_, _ = w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
@@ -218,7 +218,7 @@ func TestFetchTokenScopes_OnlyRepo(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-OAuth-Scopes", "repo")
-		_, _ = w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
@@ -239,7 +239,7 @@ func TestFetchTokenScopes_EmptyScopeHeader(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "valid-token")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
@@ -256,7 +256,7 @@ func TestFetchTokenScopes_HTTPError(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "bad-token")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.WriteHeader(http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -276,7 +276,7 @@ func TestFetchTokenScopes_BearerAuth(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("X-OAuth-Scopes", "repo")
-		_, _ = w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
