@@ -44,10 +44,30 @@ Sleep 1.5s
 Enter
 
 Sleep 1.5s
+Right
+Sleep 500ms
 Down
+Sleep 500ms
+Right
+Sleep 500ms
+Down
+Sleep 500ms
+Right
+Sleep 500ms
+Down
+Sleep 500ms
+Right
+Sleep 500ms
+Down
+Sleep 500ms
+Down
+Sleep 500ms
+Right
+Sleep 500ms
+Down
+Sleep 500ms
+Right
 Sleep 1.5s
 Enter
 
-Sleep 2.5s
-Enter
-Sleep 6s
+Sleep 2s
