@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
@@ -538,13 +537,3 @@ func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 	}
 }
 
-func execCmd(dir string, name string, args ...string) *exec.Cmd {
-	c := exec.Command(name, args...)
-	if dir != "" {
-		c.Dir = dir
-	}
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	return c
-}

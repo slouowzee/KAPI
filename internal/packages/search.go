@@ -117,7 +117,7 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 						pkg.Weekly = dl.Downloads
 					}
 				}
-				dlResp.Body.Close()
+				_ = dlResp.Body.Close()
 			}
 		}
 	}

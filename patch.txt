@@ -1,0 +1,4 @@
+				fmt.Fprintf(&sb, "%s%s\n",
+					styles.CursorStyle.Render("  ❯❯"),
+					styles.SelectedStyle.Render("  ")+optStr.String(),
+				)

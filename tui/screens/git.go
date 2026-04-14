@@ -502,11 +502,11 @@ func (m GitModel) View() string {
 		sb.WriteString(m.renderRow(gitFieldRemote, "Remote", opts, m.remoteOpt))
 	}
 
-	if (m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic) && !(m.hasGit && m.detectedURL != "") {
+	if (m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic) && (!m.hasGit || m.detectedURL == "") {
 		sb.WriteString(m.renderRepoNameRow())
 	}
 
-	if m.remoteOpt == gitRemoteExisting && !(m.hasGit && m.detectedURL != "") {
+	if m.remoteOpt == gitRemoteExisting && (!m.hasGit || m.detectedURL == "") {
 		sb.WriteString(m.renderURLRow())
 	}
 

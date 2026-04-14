@@ -156,7 +156,7 @@ func FetchStars(ctx context.Context, repo string, token string) (int64, error) {
 		if err != nil {
 			return int64(0), err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			return int64(0), fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
@@ -194,7 +194,7 @@ func getJSON(ctx context.Context, url string, dest any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)

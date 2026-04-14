@@ -55,7 +55,7 @@ func TestCurrentVersion(t *testing.T) {
 func TestCheckLatestVersion_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(Release{TagName: "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(Release{TagName: "v2.0.0"})
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -99,7 +99,7 @@ func TestCheckLatestVersion_InvalidJSON(t *testing.T) {
 func TestCheckLatestVersion_ContextCancelled(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
-		json.NewEncoder(w).Encode(Release{TagName: "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(Release{TagName: "v2.0.0"})
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -118,7 +118,7 @@ func TestCheckLatestVersion_SetsCorrectHeaders(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")
 		gotAccept = r.Header.Get("Accept")
-		json.NewEncoder(w).Encode(Release{TagName: "v1.0.0"})
+		_ = json.NewEncoder(w).Encode(Release{TagName: "v1.0.0"})
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -136,7 +136,7 @@ func TestCheckLatestVersion_SetsCorrectHeaders(t *testing.T) {
 
 func TestCheck_UpdateAvailable(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(Release{TagName: "v999.0.0"})
+		_ = json.NewEncoder(w).Encode(Release{TagName: "v999.0.0"})
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -157,7 +157,7 @@ func TestCheck_UpdateAvailable(t *testing.T) {
 
 func TestCheck_NoUpdate(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(Release{TagName: CurrentVersion})
+		_ = json.NewEncoder(w).Encode(Release{TagName: CurrentVersion})
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
@@ -190,7 +190,7 @@ func TestCheck_HTTPFailure(t *testing.T) {
 
 func TestCheck_ChannelIsBuffered(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(Release{TagName: "v1.0.0"})
+		_ = json.NewEncoder(w).Encode(Release{TagName: "v1.0.0"})
 	}))
 	defer ts.Close()
 	redirectTo(t, ts)
