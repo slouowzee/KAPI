@@ -10,7 +10,7 @@ main          ← production (stable releases only)
 
 ## Just for you to know
 - **Branch protection is enabled**: Direct pushes to `main` and `dev` are forbidden. You must open a Pull Request.
-- A PR requires **2 approvals** before it can be merged
+- A PR requires **1 approvals** before it can be merged
 - All review **conversations must be resolved** before merging
 - If you push a new commit on a PR, **previous approvals are invalidated** — reviewers must re-approve
 
@@ -108,9 +108,9 @@ stars, err := fetchGithubStars(ctx, repo, token)
 - One PR = one feature or fix — keep it focused
 - Always target `dev`
 - Fill in the PR description — summarize what changed and why
-- Assign at least 2 reviewers before submitting
+- Assign at least 1 reviewers before submitting
 - The **author cannot approve their own PR**
-- Once approved and all conversations resolved, anyone in the team can merge
+- Once approved and all conversations resolved, I will merge your changes.
 
 ---
 
