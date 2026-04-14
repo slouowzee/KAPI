@@ -455,9 +455,9 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 				cur = styles.CursorStyle.Render(" ❯❯")
 			}
 			label := styles.SelectedStyle.Render(" " + pkg.Name)
-			sb.WriteString(fmt.Sprintf("%s %s%s\n", cur, checkbox, label))
+			fmt.Fprintf(&sb, "%s %s%s\n", cur, checkbox, label)
 		} else {
-			sb.WriteString(fmt.Sprintf("     %s %s\n", checkbox, styles.DimStyle.Render(pkg.Name)))
+			fmt.Fprintf(&sb, "     %s %s\n", checkbox, styles.DimStyle.Render(pkg.Name))
 		}
 	}
 
@@ -521,7 +521,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 			absIdx := windowStart + i
 			if m.focusCart && absIdx == m.cartCursor {
 				cur := styles.CursorStyle.Render(" ❯")
-				sb.WriteString(fmt.Sprintf("%s %s\n", cur, styles.SelectedStyle.Render(p.Name)))
+				fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render(p.Name))
 			} else {
 				sb.WriteString(styles.SelectedStyle.Render("  · ") + styles.DimStyle.Render(p.Name) + "\n")
 			}

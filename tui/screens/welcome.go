@@ -288,9 +288,9 @@ func (m WelcomeModel) View() string {
 		if i == m.cursor {
 			cursor := styles.CursorStyle.Render("  ❯❯")
 			label := styles.SelectedStyle.Render(" " + item.label)
-			sb.WriteString(fmt.Sprintf("%s%s\n", cursor, label))
+			fmt.Fprintf(&sb, "%s%s\n", cursor, label)
 		} else {
-			sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render(item.label)))
+			fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render(item.label))
 		}
 	}
 

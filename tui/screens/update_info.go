@@ -67,7 +67,7 @@ func (m UpdateInfoModel) View() string {
 	sb.WriteString("    curl -fsSL https://raw.githubusercontent.com/slouowzee/kapi/main/install.sh | bash\n\n")
 
 	sb.WriteString(styles.SelectedStyle.Render("  Go Install:") + "\n")
-	sb.WriteString(fmt.Sprintf("    go install github.com/slouowzee/kapi@%s\n\n", m.latestVersion))
+	fmt.Fprintf(&sb, "    go install github.com/slouowzee/kapi@%s\n\n", m.latestVersion)
 
 	sb.WriteString(styles.MutedStyle.Render("  [↵ / esc] back to menu") + "\n")
 

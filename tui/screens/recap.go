@@ -169,29 +169,29 @@ func (m RecapModel) View() string {
 		if row.section == RECAP_SECTION_CONFIRM {
 			sb.WriteString("\n")
 			if isCursor {
-				sb.WriteString(fmt.Sprintf("%s%s\n",
+				fmt.Fprintf(&sb, "%s%s\n",
 					styles.CursorStyle.Render("  ❯❯"),
 					styles.SelectedStyle.Render(" Confirm and scaffold"),
-				))
+				)
 			} else {
-				sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render("Confirm and scaffold")))
+				fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render("Confirm and scaffold"))
 			}
 			continue
 		}
 
 		if row.section == RECAP_SECTION_ABANDON {
 			if m.abandonPending {
-				sb.WriteString(fmt.Sprintf("%s%s\n",
+				fmt.Fprintf(&sb, "%s%s\n",
 					styles.CursorStyle.Render("  ❯❯"),
 					styles.ErrorStyle.Render(" Abandon project? All data will be lost. [y] yes  [n / esc] cancel"),
-				))
+				)
 			} else if isCursor {
-				sb.WriteString(fmt.Sprintf("%s%s\n",
+				fmt.Fprintf(&sb, "%s%s\n",
 					styles.CursorStyle.Render("  ❯❯"),
 					styles.DimStyle.Render(" Abandon and return to menu"),
-				))
+				)
 			} else {
-				sb.WriteString(fmt.Sprintf("      %s\n", styles.DimStyle.Render("Abandon and return to menu")))
+				fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render("Abandon and return to menu"))
 			}
 			continue
 		}
@@ -199,15 +199,15 @@ func (m RecapModel) View() string {
 		label := fmt.Sprintf("%-17s", row.label)
 		if isCursor {
 			val := row.value + styles.DimStyle.Render("  ✎ edit")
-			sb.WriteString(fmt.Sprintf("%s%s\n",
+			fmt.Fprintf(&sb, "%s%s\n",
 				styles.CursorStyle.Render("  ❯❯"),
 				styles.SelectedStyle.Render(" "+label+val),
-			))
+			)
 		} else {
-			sb.WriteString(fmt.Sprintf("      %s%s\n",
+			fmt.Fprintf(&sb, "      %s%s\n",
 				styles.MutedStyle.Render(label),
 				styles.DimStyle.Render(row.value),
-			))
+			)
 		}
 	}
 

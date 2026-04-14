@@ -208,7 +208,7 @@ func (m SettingsModel) viewMenu() string {
 	}
 	label := fmt.Sprintf("Package manager   %s", styles.DimStyle.Render(pmLabel+" ›"))
 	cursor := styles.CursorStyle.Render("  ❯❯")
-	sb.WriteString(fmt.Sprintf("%s%s\n", cursor, styles.SelectedStyle.Render(" "+label)))
+	fmt.Fprintf(&sb, "%s%s\n", cursor, styles.SelectedStyle.Render(" "+label))
 
 	sb.WriteString("\n")
 	sb.WriteString(styles.MutedStyle.Render("  [↵] select   [esc] back   [q] quit") + "\n")
