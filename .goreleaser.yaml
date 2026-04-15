@@ -82,3 +82,12 @@ scoops:
     homepage: "https://github.com/slouowzee/kapi"
     description: "A Go-based interactive TUI CLI for project scaffolding"
 
+aurs:
+  - name: kapi-bin
+    homepage: "https://github.com/slouowzee/kapi"
+    description: "A Go-based interactive TUI CLI for project scaffolding"
+    maintainers:
+      - "slouowzee <slouowzee@gmail.com>"
+    license: "MIT"
+    private_key: '{{ .Env.AUR_KEY }}'
+    git_url: "ssh://aur@aur.archlinux.org/kapi-bin.git"
