@@ -47,6 +47,9 @@ func createGithubRepo(ctx context.Context, name string, private bool) (sshURL st
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		return "", fmt.Errorf("GitHub repo %q already exists", name)
 	}
+	if scopeErr := config.CheckGitHubScopeError(resp); scopeErr != nil {
+		return "", scopeErr
+	}
 	if resp.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("GitHub API error (HTTP %d): %s", resp.StatusCode, string(respBytes))
 	}

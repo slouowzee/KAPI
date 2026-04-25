@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/cli"
+	"github.com/slouowzee/kapi/internal/updater"
 	"github.com/slouowzee/kapi/tui"
 )
 
@@ -15,6 +16,9 @@ func main() {
 		switch os.Args[1] {
 		case "config":
 			cli.HandleConfig(os.Args[2:])
+			return
+		case "version", "-version", "--version", "-v":
+			fmt.Println(updater.CurrentVersion)
 			return
 		case "help", "--help", "-h":
 			cli.PrintHelp()
