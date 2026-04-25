@@ -3,13 +3,17 @@
 ## Workflow
 
 ```
-main          ← production (stable releases only)
-└── dev       ← integration (all features merged here first)
-    └── feat/your-feature  ← your daily work
+original repo (slouowzee/KAPI)
+└── main        ← production (stable releases only)
+    └── dev     ← integration (all features merged here first)
+
+your fork (your-username/KAPI)
+└── feat/your-feature  ← your daily work
 ```
 
 ## Just for you to know
-- **Branch protection is enabled**: Direct pushes to `main` and `dev` are forbidden. You must open a Pull Request.
+
+- **Branch protection is enabled on the upstream repo**: Direct pushes to `main` and `dev` on `slouowzee/KAPI` are forbidden — that's why contributions go through a fork + PR.
 - A PR requires **1 approvals** before it can be merged
 - All review **conversations must be resolved** before merging
 - If you push a new commit on a PR, **previous approvals are invalidated** — reviewers must re-approve
@@ -25,22 +29,20 @@ main          ← production (stable releases only)
 Use lowercase and hyphens, no spaces or special characters.
 
 | Type | Pattern |
-|------|---------|
-| Feature | `feat/<description>` |
-| Bug fix | `fix/<description>` |
-| Documentation | `docs/<description>` |
-| Refactor | `refactor/<description>` |
-| Chore | `chore/<description>` |
-| Test | `test/<description>` |
+|---|---|
+| Feature | `feat/` |
+| Bug fix | `fix/` |
+| Documentation | `docs/` |
+| Refactor | `refactor/` |
+| Chore | `chore/` |
+| Test | `test/` |
 
 Just like this: `feat/user-authentication`
-
----
 
 ## Naming Conventions
 
 | Item | Convention | Example |
-|------|------------|---------|
+|---|---|---|
 | Variables | `lowerCamelCase` | `userProfile := ...` |
 | Constants | `lowerCamelCase` or `PascalCase` | `const maxRetries = 3` |
 | Exported identifiers | `PascalCase` | `func FetchDefaults(...)` |
@@ -51,20 +53,17 @@ Just like this: `feat/user-authentication`
 
 > Follow the [Effective Go](https://go.dev/doc/effective_go) naming guidelines.
 
----
-
 ## Commit Messages
 
 Please refer to the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification.
 
 ```
-<type>: <short description in lowercase>
-
+<type>(<optional scope>): <short description>
 [optional body — explain the why, not the what]
 ```
 
 | Type | When to use |
-|------|-------------|
+|---|---|
 | `feat` | A new feature |
 | `fix` | A bug fix |
 | `docs` | Documentation changes only |
@@ -74,14 +73,13 @@ Please refer to the [Conventional Commits](https://www.conventionalcommits.org/e
 | `style` | Formatting — no logic change |
 
 **Rules:**
+
 - Use the **imperative mood**: `add`, `fix`, `update` — not `added`, `fixed`, `updated`
 - Keep the first line **under 72 characters**
 - If needed: use a second `-m` flag to add a body with a more detailed description
 - Write in **English**
 
 Just like this: `git commit -m "feat: add github token validation" -m "ensure the token has the required scopes before attempting API calls"`
-
----
 
 ## Code Comments
 
@@ -92,6 +90,7 @@ Just like this: `git commit -m "feat: add github token validation" -m "ensure th
 - Use `// NOTE:` for important clarifications
 
 **Example:**
+
 ```go
 // NOTE: we replace http.DefaultTransport instead of injecting a client
 // because several call sites use &http.Client{Timeout: d} without an explicit Transport.
@@ -101,27 +100,23 @@ http.DefaultTransport = redirectRoundTripper
 stars, err := fetchGithubStars(ctx, repo, token)
 ```
 
----
-
 ## Pull Requests
 
 - One PR = one feature or fix — keep it focused
-- Always target `dev`
+- Always target `dev` on the upstream repo (`slouowzee/KAPI`)
 - Fill in the PR description — summarize what changed and why
 - Assign at least 1 reviewers before submitting
 - The **author cannot approve their own PR**
 - Once approved and all conversations resolved, I will merge your changes.
 
----
-
 ## Code Quality
 
 Before opening a PR, make sure:
 
-```bash
-make build        # must compile without errors
-make test         # all tests must pass
-make lint         # no linter warnings (requires golangci-lint)
+```sh
+make build  # must compile without errors
+make test   # all tests must pass
+make lint   # no linter warnings (requires golangci-lint)
 ```
 
 - Do **not** use `panic` outside of truly unrecoverable situations — return errors instead
@@ -129,18 +124,25 @@ make lint         # no linter warnings (requires golangci-lint)
 - Pass `context.Context` to any function that does I/O
 - New logic must come with table-driven tests (`_test.go` alongside the source file)
 
----
-
 ## Getting Started
 
-```bash
-git clone git@github.com:slouowzee/kapi.git
+```sh
+# 1. Fork the repository on GitHub
+# 2. Clone your fork
+git clone git@github.com:<your-username>/kapi.git
 cd kapi
-git checkout dev
-git checkout -b feat/your-feature
+
+# 3. Add the upstream remote
+git remote add upstream git@github.com:slouowzee/kapi.git
+
+# 4. Create your feature branch from dev
+git fetch upstream
+git checkout -b feat/your-feature upstream/dev
+
 # ... do your work ...
 make test
 git commit -m "feat: add your feature" -m "explain the why, not the what"
 git push origin feat/your-feature
-# then open a PR on GitHub targeting dev
+
+# 5. Open a PR on GitHub from your fork targeting slouowzee/KAPI:dev
 ```
