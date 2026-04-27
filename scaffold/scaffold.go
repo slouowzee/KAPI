@@ -41,10 +41,19 @@ func Plan(
 	}
 
 	if gitCfg.InitLocal && !gitCfg.HasExistingGit {
-		steps = append(steps, Step{
-			Label:    "git init",
-			StreamFn: streamCmd(targetDir, "git", "init"),
-		})
+		if gitCfg.InitialCommit {
+			steps = append(steps, Step{
+				Label:    "git init",
+				StreamFn: streamCmd(targetDir, "git", "init"),
+			})
+			if gitCfg.UniversalGitignore {
+				steps = append(steps, Step{
+					Label: "write universal .gitignore",
+					Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
+				})
+			}
+			steps = append(steps, initialCommitStep(targetDir))
+		}
 	}
 
 	if gitCfg.Collab {
@@ -56,18 +65,6 @@ func Plan(
 		steps = append(steps, ciGithubStep(targetDir, fw, pm))
 	case "gitlab":
 		steps = append(steps, ciGitlabStep(targetDir, fw, pm))
-	}
-
-	if gitCfg.InitLocal && !gitCfg.HasExistingGit {
-		if gitCfg.UniversalGitignore {
-			steps = append(steps, Step{
-				Label: "write universal .gitignore",
-				Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
-			})
-		}
-		if gitCfg.InitialCommit {
-			steps = append(steps, initialCommitStep(targetDir))
-		}
 	}
 
 	steps = append(steps, remoteSteps(targetDir, gitCfg)...)
