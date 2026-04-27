@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	CurrentVersion   = "v1.0.0-beta.8"
+	CurrentVersion   = "v1.0.0-beta.9"
 	githubReleaseURL = "https://api.github.com/repos/slouowzee/kapi/releases/latest"
 )
 
