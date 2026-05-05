@@ -30,3 +30,6 @@ Thumbs.db
 
 # Build
 kapi
+
+goreleaser
+schema.json
