@@ -90,7 +90,7 @@ func TestLoad_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() on missing file returned error: %v", err)
 	}
-	if cfg != (Config{}) {
+	if cfg.GithubToken != "" || cfg.PackageManager != "" || len(cfg.Favorites) != 0 {
 		t.Errorf("Load() on missing file = %+v, want zero value", cfg)
 	}
 }
@@ -98,7 +98,7 @@ func TestLoad_MissingFile(t *testing.T) {
 func TestSaveLoad_RoundTrip(t *testing.T) {
 	setupTempHome(t)
 
-	want := Config{GithubToken: "tok123", PackageManager: "pnpm"}
+	want := Config{GithubToken: "tok123", PackageManager: "pnpm", Favorites: map[string][]FavoritePackage{"react": {{Name: "react"}}}}
 	if err := Save(want); err != nil {
 		t.Fatalf("Save() error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() after Save() error: %v", err)
 	}
-	if got != want {
+	if got.GithubToken != want.GithubToken || got.PackageManager != want.PackageManager || len(got.Favorites) != len(want.Favorites) || got.Favorites["react"][0].Name != want.Favorites["react"][0].Name {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }
