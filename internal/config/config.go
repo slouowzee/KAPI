@@ -99,8 +99,14 @@ func CheckGitHubScopeError(resp *http.Response) error {
 }
 
 type Config struct {
-	GithubToken    string `json:"github_token,omitempty"`
-	PackageManager string `json:"package_manager,omitempty"`
+	GithubToken    string                       `json:"github_token,omitempty"`
+	PackageManager string                       `json:"package_manager,omitempty"`
+	Favorites      map[string][]FavoritePackage `json:"favorites,omitempty"`
+}
+
+type FavoritePackage struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func Load() (Config, error) {

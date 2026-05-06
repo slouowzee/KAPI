@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"github.com/slouowzee/kapi/internal/config"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,27 @@ import (
 const (
 	PACKAGES_DEBOUNCE = 300 * time.Millisecond
 )
+
+type favoritesLoadedMsg struct {
+	favorites []packages.Package
+}
+
+func loadFavoritesCmd(frameworkID string) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.Load()
+		if err != nil {
+			return favoritesLoadedMsg{}
+		}
+		var favs []packages.Package
+		for _, f := range cfg.Favorites[frameworkID] {
+			favs = append(favs, packages.Package{
+				Name:        f.Name,
+				Description: f.Description,
+			})
+		}
+		return favoritesLoadedMsg{favorites: favs}
+	}
+}
 
 type defaultsLoadedMsg struct {
 	results []packages.Package
@@ -73,18 +95,21 @@ type PackagesModel struct {
 	results         []packages.Package
 	defaults        []packages.Package
 	cart            []packages.Package
+	favorites       []packages.Package
 	cursor          int
 	searching       bool
 	loadingDefaults bool
 	searchErr       error
 	initialPrompt   bool
 
+	inCartMode      bool
+	inFavoritesMode bool
+	cartCursor      int
+	favoritesCursor int
+
 	done          bool
 	backPressed   bool
 	backCancelled bool
-
-	focusCart  bool
-	cartCursor int
 
 	savedCart []packages.Package
 }
@@ -99,6 +124,7 @@ func NewPackages(width, height int, framework registry.Framework, targetDir stri
 		targetDir:       targetDir,
 		initialPrompt:   true,
 		loadingDefaults: true,
+		favorites:       []packages.Package{},
 	}
 }
 
@@ -114,6 +140,7 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 		targetDir:       targetDir,
 		initialPrompt:   true,
 		loadingDefaults: true,
+		favorites:       []packages.Package{},
 		cart:            append([]packages.Package{}, cart...),
 		savedCart:       saved,
 	}
@@ -134,8 +161,23 @@ func (m *PackagesModel) ConsumeBack()          { m.backPressed = false }
 func (m *PackagesModel) ConsumeBackCancelled() { m.backCancelled = false }
 func (m *PackagesModel) ConsumeDone()          { m.done = false }
 
+
+func (m PackagesModel) getFilteredFavorites() []packages.Package {
+	if m.query == "" {
+		return m.favorites
+	}
+	var filtered []packages.Package
+	q := strings.ToLower(m.query)
+	for _, p := range m.favorites {
+		if strings.Contains(strings.ToLower(p.Name), q) || strings.Contains(strings.ToLower(p.Description), q) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
 func (m PackagesModel) Init() tea.Cmd {
-	return loadDefaultsCmd(m.framework.ID, m.isPhp)
+	return tea.Batch(loadDefaultsCmd(m.framework.ID, m.isPhp), loadFavoritesCmd(m.framework.ID))
 }
 
 func (m PackagesModel) currentPackage() (packages.Package, bool) {
@@ -164,6 +206,49 @@ func (m *PackagesModel) toggleCart(pkg packages.Package) {
 	m.cart = append(m.cart, pkg)
 }
 
+func (m PackagesModel) isFavorite(name string) bool {
+	for _, p := range m.favorites {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *PackagesModel) toggleFavorite(pkg packages.Package) tea.Cmd {
+	isFav := false
+	for i, p := range m.favorites {
+		if p.Name == pkg.Name {
+			m.favorites = append(m.favorites[:i], m.favorites[i+1:]...)
+			isFav = true
+			break
+		}
+	}
+	if !isFav {
+		m.favorites = append(m.favorites, pkg)
+	}
+
+	fwID := m.framework.ID
+	favsToSave := m.favorites
+
+	return func() tea.Msg {
+		cfg, _ := config.Load()
+		if cfg.Favorites == nil {
+			cfg.Favorites = make(map[string][]config.FavoritePackage)
+		}
+		var newFavs []config.FavoritePackage
+		for _, f := range favsToSave {
+			newFavs = append(newFavs, config.FavoritePackage{
+				Name:        f.Name,
+				Description: f.Description,
+			})
+		}
+		cfg.Favorites[fwID] = newFavs
+		_ = config.Save(cfg)
+		return nil
+	}
+}
+
 func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -177,6 +262,9 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 		if m.initialPrompt {
 			m.results = m.defaults
 		}
+
+	case favoritesLoadedMsg:
+		m.favorites = msg.favorites
 
 	case debounceMsg:
 		if msg.query == m.query {
@@ -197,11 +285,24 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 		switch msg.String() {
 		case "tab":
 			if len(m.cart) > 0 {
-				m.focusCart = !m.focusCart
+				m.inCartMode = !m.inCartMode
+				if m.inCartMode {
+					m.cartCursor = 0
+				}
 			}
+		case "ctrl+f":
+			m.inFavoritesMode = !m.inFavoritesMode
+			m.inCartMode = false
+			m.favoritesCursor = 0
+			m.query = ""
+			m.queryPos = 0
+			m.initialPrompt = m.query == ""
+			m.searching = false
+
 		case "esc":
-			if m.focusCart {
-				m.focusCart = false
+			if m.inCartMode || m.inFavoritesMode {
+				m.inCartMode = false
+				m.inFavoritesMode = false
 			} else if m.query != "" {
 				m.query = ""
 				m.queryPos = 0
@@ -219,7 +320,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 		case "enter":
 			m.done = true
 		case " ":
-			if m.focusCart {
+			if m.inCartMode {
 				if len(m.cart) > 0 {
 					pkg := m.cart[m.cartCursor]
 					m.toggleCart(pkg)
@@ -230,16 +331,57 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 						m.cartCursor = 0
 					}
 					if len(m.cart) == 0 {
-						m.focusCart = false
+						m.inCartMode = false
+						m.inFavoritesMode = true
 					}
+				}
+			} else if m.inFavoritesMode {
+				favs := m.getFilteredFavorites()
+				if len(favs) > 0 && m.favoritesCursor < len(favs) {
+					pkg := favs[m.favoritesCursor]
+					m.toggleCart(pkg)
 				}
 			} else {
 				if pkg, ok := m.currentPackage(); ok {
 					m.toggleCart(pkg)
 				}
 			}
+		case "f", "F":
+			if m.inFavoritesMode {
+				favs := m.getFilteredFavorites()
+				if len(favs) > 0 && m.favoritesCursor < len(favs) {
+					pkg := favs[m.favoritesCursor]
+					cmd := m.toggleFavorite(pkg)
+					favs = m.getFilteredFavorites()
+					if m.favoritesCursor >= len(favs) {
+						m.favoritesCursor = len(favs) - 1
+					}
+					if m.favoritesCursor < 0 {
+						m.favoritesCursor = 0
+					}
+					return m, cmd
+				}
+			} else if m.inCartMode {
+				if len(m.cart) > 0 {
+					pkg := m.cart[m.cartCursor]
+					return m, m.toggleFavorite(pkg)
+				}
+			} else {
+				if !m.initialPrompt && m.query != "" && (msg.String() == "f" || msg.String() == "F") {
+					runes := []rune(m.query)
+					m.query = string(append(runes[:m.queryPos], append([]rune{rune(msg.String()[0])}, runes[m.queryPos:]...)...))
+					m.queryPos++
+					m.initialPrompt = false
+					m.searching = true
+					m.cursor = 0
+					return m, debounceCmd(m.query)
+				}
+				if pkg, ok := m.currentPackage(); ok {
+					return m, m.toggleFavorite(pkg)
+				}
+			}
 		case "up", "k":
-			if msg.String() == "k" && !m.focusCart && m.query != "" {
+			if msg.String() == "k" && !m.inCartMode && !m.inFavoritesMode {
 				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos], append([]rune{'k'}, runes[m.queryPos:]...)...))
 				m.queryPos++
@@ -248,9 +390,13 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.cursor = 0
 				return m, debounceCmd(m.query)
 			}
-			if m.focusCart {
+			if m.inCartMode {
 				if m.cartCursor > 0 {
 					m.cartCursor--
+				}
+			} else if m.inFavoritesMode {
+				if m.favoritesCursor > 0 {
+					m.favoritesCursor--
 				}
 			} else {
 				if m.cursor > 0 {
@@ -258,7 +404,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "down", "j":
-			if msg.String() == "j" && !m.focusCart && m.query != "" {
+			if msg.String() == "j" && !m.inCartMode && !m.inFavoritesMode {
 				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos], append([]rune{'j'}, runes[m.queryPos:]...)...))
 				m.queryPos++
@@ -267,9 +413,14 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.cursor = 0
 				return m, debounceCmd(m.query)
 			}
-			if m.focusCart {
+			if m.inCartMode {
 				if m.cartCursor < len(m.cart)-1 {
 					m.cartCursor++
+				}
+			} else if m.inFavoritesMode {
+				favs := m.getFilteredFavorites()
+				if m.favoritesCursor < len(favs)-1 {
+					m.favoritesCursor++
 				}
 			} else {
 				if m.cursor < len(m.results)-1 {
@@ -277,17 +428,22 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "left":
-			if !m.focusCart && m.queryPos > 0 {
+			if !m.inCartMode && m.queryPos > 0 {
 				m.queryPos--
 			}
 		case "right":
-			if !m.focusCart && m.queryPos < len([]rune(m.query)) {
-				m.queryPos++
+			if !m.inCartMode {
+				runes := []rune(m.query)
+				if m.queryPos < len(runes) {
+					m.queryPos++
+				}
 			}
 		case "backspace":
-			m.focusCart = false
+			if m.inCartMode {
+				break
+			}
+			runes := []rune(m.query)
 			if m.queryPos > 0 {
-				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos-1], runes[m.queryPos:]...))
 				m.queryPos--
 				m.initialPrompt = m.query == ""
@@ -301,7 +457,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "delete":
-			m.focusCart = false
+			m.inCartMode = false
 			runes := []rune(m.query)
 			if m.queryPos < len(runes) {
 				m.query = string(append(runes[:m.queryPos], runes[m.queryPos+1:]...))
@@ -317,7 +473,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 			}
 		default:
 			if len(msg.Runes) > 0 {
-				m.focusCart = false
+				m.inCartMode = false
 				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos], append(msg.Runes, runes[m.queryPos:]...)...))
 				m.queryPos += len(msg.Runes)
@@ -375,12 +531,14 @@ func (m PackagesModel) View() string {
 	sb.WriteString(box + "\n\n")
 
 	var hints string
-	if m.focusCart {
-		hints = "  [↑↓] navigate cart   [space] remove   [tab] back to search   [↵] confirm   [ctrl+c] quit"
+	if m.inCartMode {
+		hints = "  [↑↓] navigate cart   [space] remove   [f] favorite   [tab] focus search   [ctrl+f] favorites   [↵] confirm   [ctrl+c] quit"
+	} else if m.inFavoritesMode {
+		hints = "  [↑↓] navigate   [space] toggle   [f] remove   [tab] focus cart   [ctrl+f] close   [↵] confirm   [ctrl+c] quit"
 	} else if m.query != "" {
-		hints = "  [↑↓] navigate   [space] toggle   [tab] cart   [esc] clear   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate   [space] toggle   [f] favorite   [tab] focus cart   [ctrl+f] favorites   [esc] clear   [↵] confirm   [ctrl+c] quit"
 	} else {
-		hints = "  [↑↓] navigate   [space] toggle   [tab] cart   [esc] back   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate   [space] toggle   [f] favorite   [tab] focus cart   [ctrl+f] favorites   [esc] back   [↵] confirm   [ctrl+c] quit"
 	}
 	sb.WriteString(styles.MutedStyle.Render(hints) + "\n")
 
@@ -391,6 +549,65 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 	var sb strings.Builder
 
 	sepWidth := listWidth - 2
+
+	if m.inFavoritesMode {
+		sb.WriteString(styles.SelectedStyle.Render(fmt.Sprintf(" Favorites (%d)", len(m.favorites))) + "\n")
+		if m.query == "" {
+			sb.WriteString(styles.MutedStyle.Render(" Search favs: ") + styles.DimStyle.Render("type to filter…") + styles.TitleStyle.Render("_") + "\n")
+		} else {
+			sb.WriteString(styles.MutedStyle.Render(" Search favs: ") + renderTextInput(m.query, m.queryPos) + "\n")
+		}
+		separator := styles.DimStyle.Render(strings.Repeat("─", sepWidth))
+		sb.WriteString(separator + "\n")
+
+		favs := m.getFilteredFavorites()
+		if len(favs) == 0 {
+			sb.WriteString(styles.DimStyle.Render(" No matching favorites.") + "\n")
+			return sb.String()
+		}
+
+		total := len(favs)
+		windowStart, windowEnd := scrollWindow(m.favoritesCursor, total, visible)
+
+		if windowStart > 0 {
+			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↑ %d more", windowStart)) + "\n")
+		}
+
+		if windowEnd > total {
+			windowEnd = total
+		}
+		
+		for i, pkg := range favs[windowStart:windowEnd] {
+			absIdx := windowStart + i
+			inCart := m.isInCart(pkg.Name)
+
+			var checkbox string
+			if inCart {
+				checkbox = styles.SelectedStyle.Render("[x]")
+			} else {
+				checkbox = styles.DimStyle.Render("[ ]")
+			}
+			
+			favIcon := styles.SelectedStyle.Render(" ★")
+
+			if absIdx == m.favoritesCursor {
+				cur := styles.CursorStyle.Render(" ❯❯")
+				label := styles.SelectedStyle.Render(pkg.Name)
+				line := fmt.Sprintf("%s %s %s%s", cur, checkbox, label, favIcon)
+				sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
+			} else {
+				label := styles.DimStyle.Render(pkg.Name)
+				line := fmt.Sprintf("    %s %s%s", checkbox, label, favIcon)
+				sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
+			}
+		}
+
+		if windowEnd < total {
+			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↓ %d more", total-windowEnd)) + "\n")
+		}
+
+		return sb.String()
+	}
 
 	if m.query == "" {
 		sb.WriteString(styles.MutedStyle.Render(" Search: ") +
@@ -446,18 +663,29 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 		} else {
 			checkbox = styles.DimStyle.Render("[ ]")
 		}
+		
+		isFav := m.isFavorite(pkg.Name)
+		var favIcon string
+		if isFav {
+			favIcon = styles.SelectedStyle.Render(" ★")
+		} else {
+			favIcon = "  "
+		}
 
 		if absIdx == m.cursor {
 			var cur string
-			if m.focusCart {
+			if m.inCartMode || m.inFavoritesMode {
 				cur = styles.DimStyle.Render(" ❯❯")
 			} else {
 				cur = styles.CursorStyle.Render(" ❯❯")
 			}
-			label := styles.SelectedStyle.Render(" " + pkg.Name)
-			fmt.Fprintf(&sb, "%s %s%s\n", cur, checkbox, label)
+			label := styles.SelectedStyle.Render(pkg.Name)
+			line := fmt.Sprintf("%s %s %s%s", cur, checkbox, label, favIcon)
+			sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
 		} else {
-			fmt.Fprintf(&sb, "     %s %s\n", checkbox, styles.DimStyle.Render(pkg.Name))
+			label := styles.DimStyle.Render(pkg.Name)
+			line := fmt.Sprintf("    %s %s%s", checkbox, label, favIcon)
+			sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
 		}
 	}
 
@@ -501,15 +729,18 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 	sb.WriteString(separator + "\n")
 
 	cartLabel := fmt.Sprintf("Cart (%d)", len(m.cart))
-	if m.focusCart {
-		cartLabel += styles.DimStyle.Render(" (focused)")
+	if m.inCartMode {
+		cartLabel = styles.SelectedStyle.Render(cartLabel)
+	} else {
+		cartLabel = styles.MutedStyle.Render(cartLabel)
 	}
-	sb.WriteString(styles.MutedStyle.Render(cartLabel) + "\n")
+	
+	sb.WriteString(cartLabel + "\n")
 
 	if len(m.cart) == 0 {
 		sb.WriteString(styles.DimStyle.Render("  empty") + "\n")
 	} else {
-		const visibleCart = 4
+		const visibleCart = 6
 		total := len(m.cart)
 
 		windowStart, windowEnd := scrollWindow(m.cartCursor, total, visibleCart)
@@ -519,9 +750,9 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 		}
 		for i, p := range m.cart[windowStart:windowEnd] {
 			absIdx := windowStart + i
-			if m.focusCart && absIdx == m.cartCursor {
-				cur := styles.CursorStyle.Render(" ❯")
-				fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render(p.Name))
+			if m.inCartMode && absIdx == m.cartCursor {
+				cur := styles.CursorStyle.Render("❯")
+				fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render("· " + p.Name))
 			} else {
 				sb.WriteString(styles.SelectedStyle.Render("  · ") + styles.DimStyle.Render(p.Name) + "\n")
 			}
