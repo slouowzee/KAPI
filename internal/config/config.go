@@ -102,11 +102,19 @@ type Config struct {
 	GithubToken    string                       `json:"github_token,omitempty"`
 	PackageManager string                       `json:"package_manager,omitempty"`
 	Favorites      map[string][]FavoritePackage `json:"favorites,omitempty"`
+	FreezeVersionPackages map[string][]FreezeVersionPackage   `json:"freeze_version_packages,omitempty"`
 }
 
 type FavoritePackage struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+type FreezeVersionPackage struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version	 	string `json:"version"`
+	Raison 		string `json:"raison,omitempty"`
 }
 
 func Load() (Config, error) {

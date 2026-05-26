@@ -111,11 +111,13 @@ type PackagesModel struct {
 	backPressed   bool
 	backCancelled bool
 
-	savedCart []packages.Package
+	savedCart      []packages.Package
+	freezeVersions map[string]string
 }
 
 func NewPackages(width, height int, framework registry.Framework, targetDir string) PackagesModel {
 	isPhp := framework.Ecosystem == "php"
+	freezeVersions := loadFreezeVersions()
 	return PackagesModel{
 		width:           width,
 		height:          height,
@@ -125,6 +127,7 @@ func NewPackages(width, height int, framework registry.Framework, targetDir stri
 		initialPrompt:   true,
 		loadingDefaults: true,
 		favorites:       []packages.Package{},
+		freezeVersions:  freezeVersions,
 	}
 }
 
@@ -132,6 +135,7 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 	isPhp := framework.Ecosystem == "php"
 	saved := make([]packages.Package, len(cart))
 	copy(saved, cart)
+	freezeVersions := loadFreezeVersions()
 	return PackagesModel{
 		width:           width,
 		height:          height,
@@ -143,7 +147,22 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 		favorites:       []packages.Package{},
 		cart:            append([]packages.Package{}, cart...),
 		savedCart:       saved,
+		freezeVersions:  freezeVersions,
 	}
+}
+
+func loadFreezeVersions() map[string]string {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	freezeVersions := make(map[string]string)
+	for _, pkgs := range cfg.FreezeVersionPackages {
+		for _, p := range pkgs {
+			freezeVersions[p.Name] = p.Version
+		}
+	}
+	return freezeVersions
 }
 
 func (m *PackagesModel) SetSize(width, height int) {
@@ -202,6 +221,9 @@ func (m *PackagesModel) toggleCart(pkg packages.Package) {
 			m.cart = append(m.cart[:i], m.cart[i+1:]...)
 			return
 		}
+	}
+	if ver, ok := m.freezeVersions[pkg.Name]; ok {
+		pkg.PinnedVersion = ver
 	}
 	m.cart = append(m.cart, pkg)
 }
@@ -704,8 +726,14 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 		sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")
 		sb.WriteString(styles.DimStyle.Render(pkg.Description) + "\n")
 		sb.WriteString("\n")
-		if pkg.Version != "" {
-			sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(pkg.Version) + "\n")
+		displayVersion := ""
+		if frozenVer, ok := m.freezeVersions[pkg.Name]; ok {
+			displayVersion = frozenVer
+		} else if len(pkg.Versions) > 0 {
+			displayVersion = pkg.Versions[0]
+		}
+		if displayVersion != "" {
+			sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(displayVersion) + "\n")
 		}
 		if pkg.Stars > 0 {
 			sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(pkg.Stars)) + "\n")
