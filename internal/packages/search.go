@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,12 +39,13 @@ const searchLimitNpm = 250
 const searchLimitPackagist = 100
 
 type Package struct {
-	Name        string
-	Description string
-	Version     string
-	Weekly      int64
-	Stars       int64
-	GithubRepo  string
+	Name           string
+	Description    string
+	Versions       []string
+	PinnedVersion  string
+	Weekly         int64
+	Stars          int64
+	GithubRepo     string
 }
 
 var githubRepoRe = regexp.MustCompile(`github\.com[/:]([^/]+/[^/.\s]+?)(?:\.git)?$`)
@@ -68,7 +70,7 @@ func fetchStars(ctx context.Context, repo string) int64 {
 func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 	encoded := url.PathEscape(pkg.Name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://registry.npmjs.org/"+encoded+"/latest", nil)
+		"https://registry.npmjs.org/"+encoded, nil)
 	if err != nil {
 		return
 	}
@@ -82,8 +84,8 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 	defer func() { _ = resp.Body.Close() }()
 
 	var meta struct {
-		Version     string `json:"version"`
-		Description string `json:"description"`
+		Description string                       `json:"description"`
+		Versions    map[string]json.RawMessage   `json:"versions"`
 		Repository  struct {
 			URL string `json:"url"`
 		} `json:"repository"`
@@ -92,8 +94,13 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 		return
 	}
 
-	if pkg.Version == "" {
-		pkg.Version = meta.Version
+	if len(pkg.Versions) == 0 && len(meta.Versions) > 0 {
+		for v := range meta.Versions {
+			pkg.Versions = append(pkg.Versions, v)
+		}
+		sort.Slice(pkg.Versions, func(i, j int) bool {
+			return semver.Greater(pkg.Versions[i], pkg.Versions[j])
+		})
 	}
 	if pkg.Description == "" {
 		pkg.Description = meta.Description
@@ -156,11 +163,12 @@ func enrichPackagist(ctx context.Context, client *http.Client, pkg *Package) {
 
 	for v := range meta.Package.Versions {
 		if !strings.Contains(v, "dev") && !strings.HasPrefix(v, "v0.") {
-			if pkg.Version == "" || semver.Greater(v, pkg.Version) {
-				pkg.Version = v
-			}
+			pkg.Versions = append(pkg.Versions, v)
 		}
 	}
+	sort.Slice(pkg.Versions, func(i, j int) bool {
+		return semver.Greater(pkg.Versions[i], pkg.Versions[j])
+	})
 	if pkg.Description == "" {
 		pkg.Description = meta.Package.Description
 	}
@@ -248,7 +256,6 @@ func SearchNpm(ctx context.Context, query string) ([]Package, error) {
 		results = append(results, Package{
 			Name:        o.Package.Name,
 			Description: o.Package.Description,
-			Version:     o.Package.Version,
 			Weekly:      o.Downloads.Weekly,
 		})
 	}

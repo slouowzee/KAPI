@@ -124,10 +124,12 @@ func TestEnrichNpm(t *testing.T) {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/"+pkgName+"/latest", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	mux.HandleFunc("/"+pkgName, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.npm.install-v1+json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"version":     "1.2.3",
+			"versions": map[string]any{
+				"1.2.3": map[string]string{"version": "1.2.3"},
+			},
 			"description": "A test package",
 			"repository":  map[string]string{"url": "https://github.com/" + repoSlug},
 		})
@@ -151,8 +153,8 @@ func TestEnrichNpm(t *testing.T) {
 	pkg := &Package{Name: pkgName}
 	enrichNpm(context.Background(), client, pkg)
 
-	if pkg.Version != "1.2.3" {
-		t.Errorf("Version = %q, want 1.2.3", pkg.Version)
+	if pkg.Versions[0] != "1.2.3" {
+		t.Errorf("Version = %q, want 1.2.3", pkg.Versions[0])
 	}
 	if pkg.Description != "A test package" {
 		t.Errorf("Description = %q, want 'A test package'", pkg.Description)
@@ -179,8 +181,8 @@ func TestEnrichNpm_NonOK(t *testing.T) {
 	pkg := &Package{Name: "some-pkg-nonok"}
 	enrichNpm(context.Background(), client, pkg)
 
-	if pkg.Version != "" || pkg.Stars != 0 {
-		t.Errorf("expected empty enrichment on error, got Version=%q Stars=%d", pkg.Version, pkg.Stars)
+	if len(pkg.Versions) > 0 || pkg.Stars != 0 {
+		t.Errorf("expected empty enrichment on error, got Version=%q Stars=%d", pkg.Versions[0], pkg.Stars)
 	}
 }
 
@@ -231,8 +233,8 @@ func TestEnrichPackagist(t *testing.T) {
 	if pkg.GithubRepo != repoSlug {
 		t.Errorf("GithubRepo = %q, want %q", pkg.GithubRepo, repoSlug)
 	}
-	if pkg.Version != "v2.0.0" {
-		t.Errorf("Version = %q, want v2.0.0", pkg.Version)
+	if len(pkg.Versions) != 2 {
+		t.Errorf("Versions len = %d, want 2", len(pkg.Versions))
 	}
 }
 
@@ -258,10 +260,12 @@ func TestSearchNpm(t *testing.T) {
 		})
 	})
 
-	mux.HandleFunc("/"+pkgName+"/latest", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	mux.HandleFunc("/"+pkgName, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.npm.install-v1+json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"version":    "3.0.0",
+			"versions": map[string]any{
+				"3.0.0": map[string]string{"version": "3.0.0"},
+			},
 			"repository": map[string]string{"url": "https://github.com/" + repoSlug},
 		})
 	})
@@ -291,8 +295,8 @@ func TestSearchNpm(t *testing.T) {
 	if p.Name != pkgName {
 		t.Errorf("Name = %q, want %q", p.Name, pkgName)
 	}
-	if p.Version != "3.0.0" {
-		t.Errorf("Version = %q, want 3.0.0", p.Version)
+	if p.Versions[0] != "3.0.0" {
+		t.Errorf("Version = %q, want 3.0.0", p.Versions[0])
 	}
 	if p.Stars != 55 {
 		t.Errorf("Stars = %d, want 55", p.Stars)
@@ -388,10 +392,12 @@ func TestFetchDefaults_Npm(t *testing.T) {
 	const repoSlug = "test-owner/repo-fetchdefaults-npm"
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/"+pkgName+"/latest", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	mux.HandleFunc("/"+pkgName, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.npm.install-v1+json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"version":    "0.1.0",
+			"versions": map[string]any{
+				"0.1.0": map[string]string{"version": "0.1.0"},
+			},
 			"repository": map[string]string{"url": "https://github.com/" + repoSlug},
 		})
 	})
@@ -415,8 +421,8 @@ func TestFetchDefaults_Npm(t *testing.T) {
 	if pkgs[0].Name != pkgName {
 		t.Errorf("Name = %q, want %q", pkgs[0].Name, pkgName)
 	}
-	if pkgs[0].Version != "0.1.0" {
-		t.Errorf("Version = %q, want 0.1.0", pkgs[0].Version)
+	if pkgs[0].Versions[0] != "0.1.0" {
+		t.Errorf("Version = %q, want 0.1.0", pkgs[0].Versions[0])
 	}
 }
 
