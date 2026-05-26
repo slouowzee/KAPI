@@ -12,9 +12,11 @@ func PrintHelp() {
 	fmt.Println("  " + styles.DimStyle.Render("Version: "+updater.CurrentVersion))
 	fmt.Println()
 	fmt.Println(styles.MutedStyle.Render("  Usage:"))
-	fmt.Println("    " + styles.SelectedStyle.Render("kapi") + "                  Launch the interactive TUI")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi") + "                   Launch the interactive TUI")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <k>") + "        Read a configuration value")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <k> <v>") + "    Set a configuration value")
-	fmt.Println("    " + styles.SelectedStyle.Render("kapi help") + "             Show this help message")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <key>") + "      Freeze a package version")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi version") + "           Show the current version")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi help") + "              Show this help message")
 	fmt.Println()
 }

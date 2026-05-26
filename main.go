@@ -17,6 +17,9 @@ func main() {
 		case "config":
 			cli.HandleConfig(os.Args[2:])
 			return
+		case "freeze":
+			cli.HandleFreeze(os.Args[2:])
+			return
 		case "version", "-version", "--version", "-v":
 			fmt.Println(updater.CurrentVersion)
 			return

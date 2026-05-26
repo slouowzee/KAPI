@@ -293,9 +293,18 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 	if len(pkgs) == 0 {
 		return nil
 	}
+
 	names := make([]string, len(pkgs))
 	for i, p := range pkgs {
-		names[i] = p.Name
+		if p.PinnedVersion != "" {
+			if fw.Ecosystem == "php" {
+				names[i] = p.Name + ":" + p.PinnedVersion
+			} else {
+				names[i] = p.Name + "@" + p.PinnedVersion
+			}
+		} else {
+			names[i] = p.Name
+		}
 	}
 
 	if fw.Ecosystem == "php" {
