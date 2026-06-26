@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -15,8 +16,8 @@ import (
 
 func HandleFreeze(args []string) {
 	if len(args) == 0 {
-		printFreezeHelp()
-		os.Exit(1)
+		listFrozen()
+		return
 	}
 
 	arg := args[0]
@@ -74,6 +75,8 @@ func HandleFreeze(args []string) {
 		}
 	}
 
+	note := promptNote()
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Printf("Error loading configuration: %v\n", err)
@@ -85,15 +88,16 @@ func HandleFreeze(args []string) {
 	}
 
 	freezePkg := config.FreezeVersionPackage{
-		Name:        pkg.Name,
-		Version:     version,
-		Description: pkg.Description,
+		Name:    pkg.Name,
+		Version: version,
+		Note:    note,
 	}
 
 	exists := false
 	for i, f := range cfg.FreezeVersionPackages[registryName] {
 		if f.Name == pkg.Name {
 			cfg.FreezeVersionPackages[registryName][i].Version = version
+			cfg.FreezeVersionPackages[registryName][i].Note = note
 			exists = true
 			break
 		}
@@ -118,6 +122,50 @@ func printFreezeHelp() {
 	fmt.Println()
 }
 
+func listFrozen() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("Error loading configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	var registries []string
+	for reg, pkgs := range cfg.FreezeVersionPackages {
+		if len(pkgs) == 0 {
+			continue
+		}
+		registries = append(registries, reg)
+	}
+
+	if len(registries) == 0 {
+		fmt.Println("No frozen packages.")
+		return
+	}
+
+	PrintLogoAndTitle("Frozen Packages")
+	sort.Strings(registries)
+
+	for _, reg := range registries {
+		pkgs := cfg.FreezeVersionPackages[reg]
+		sort.Slice(pkgs, func(i, j int) bool {
+			return pkgs[i].Name < pkgs[j].Name
+		})
+		fmt.Println("  " + styles.SelectedStyle.Render(reg+":") + "\n")
+		for _, p := range pkgs {
+			line := fmt.Sprintf("    %s @ %s", p.Name, styles.SubtitleStyle.Render(p.Version))
+			if p.Note != "" {
+				note := p.Note
+				if len(note) > 50 {
+					note = note[:47] + "..."
+				}
+				line += "  — " + styles.DimStyle.Render(note)
+			}
+			fmt.Println(line)
+		}
+		fmt.Println()
+	}
+}
+
 func findExactPackage(ctx context.Context, name string) (*packages.Package, string) {
 	res := packages.FetchDefaults(ctx, []string{name}, false)
 	if len(res) > 0 && len(res[0].Versions) > 0 {
@@ -139,7 +187,7 @@ func fuzzySearchPackage(ctx context.Context, query string) (*packages.Package, s
 	npmRes, _ := packages.SearchNpm(ctx, query)
 	packagistRes, _ := packages.SearchPackagist(ctx, query)
 
-	for i := 0; i < len(npmRes) && i < 10; i++ {
+	for i := 0; i < len(npmRes) && i < 25; i++ {
 		if len(npmRes[i].Versions) > 0 {
 			results = append(results, struct {
 				pkg packages.Package
@@ -147,7 +195,7 @@ func fuzzySearchPackage(ctx context.Context, query string) (*packages.Package, s
 			}{npmRes[i], "npm"})
 		}
 	}
-	for i := 0; i < len(packagistRes) && i < 10; i++ {
+	for i := 0; i < len(packagistRes) && i < 25; i++ {
 		if len(packagistRes[i].Versions) > 0 {
 			results = append(results, struct {
 				pkg packages.Package
@@ -187,16 +235,20 @@ func promptForVersion(pkg *packages.Package) string {
 		return semver.Greater(sorted[i], sorted[j])
 	})
 
-	var display []string
-	if len(sorted) > 10 {
-		display = append(display, sorted[:10]...)
-	} else {
-		display = append(display, sorted...)
-	}
-
-	choice, err := PromptChoice(fmt.Sprintf("Select a version for '%s':", pkg.Name), display)
+	choice, err := PromptChoice(fmt.Sprintf("Select a version for '%s':", pkg.Name), sorted,
+		"⚠ Choosing an older version may cause dependency conflicts with recent framework versions.")
 	if err != nil {
 		os.Exit(1)
 	}
-	return display[choice]
+	return sorted[choice]
+}
+
+func promptNote() string {
+	fmt.Println("Optional note: why are you freezing this package? (press enter to skip)")
+	fmt.Print("> ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		return strings.TrimSpace(scanner.Text())
+	}
+	return ""
 }
