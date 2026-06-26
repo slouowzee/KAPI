@@ -111,10 +111,9 @@ type FavoritePackage struct {
 }
 
 type FreezeVersionPackage struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Version	 	string `json:"version"`
-	Raison 		string `json:"raison,omitempty"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Note    string `json:"note,omitempty"`
 }
 
 func Load() (Config, error) {

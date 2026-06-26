@@ -295,6 +295,7 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 	}
 
 	names := make([]string, len(pkgs))
+	var frozenInfo []string
 	for i, p := range pkgs {
 		if p.PinnedVersion != "" {
 			if fw.Ecosystem == "php" {
@@ -302,23 +303,38 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 			} else {
 				names[i] = p.Name + "@" + p.PinnedVersion
 			}
+			frozenInfo = append(frozenInfo, fmt.Sprintf("  • %s frozen at %s", p.Name, p.PinnedVersion))
 		} else {
 			names[i] = p.Name
 		}
 	}
 
+	var steps []Step
+
 	if fw.Ecosystem == "php" {
 		args := append([]string{"require"}, names...)
-		return []Step{{
+		steps = append(steps, Step{
 			Label:    "composer require " + strings.Join(names, " "),
 			StreamFn: streamCmdSlice(targetDir, append([]string{"composer"}, args...)),
-		}}
+		})
+	} else {
+		argv := append(append([]string(nil), pm.InstallArgs()...), names...)
+		steps = append(steps, Step{
+			Label:    strings.Join(argv, " "),
+			StreamFn: streamCmdSlice(targetDir, argv),
+		})
 	}
-	argv := append(append([]string(nil), pm.InstallArgs()...), names...)
-	return []Step{{
-		Label:    strings.Join(argv, " "),
-		StreamFn: streamCmdSlice(targetDir, argv),
-	}}
+
+	if len(frozenInfo) > 0 {
+		for _, info := range frozenInfo {
+			steps = append(steps, Step{
+				Label: info,
+				Fn:    func() error { return nil },
+			})
+		}
+	}
+
+	return steps
 }
 
 func collabSteps(targetDir string) []Step {

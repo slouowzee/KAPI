@@ -112,6 +112,64 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveLoad_FreezeVersionPackages(t *testing.T) {
+	setupTempHome(t)
+
+	want := Config{
+		FreezeVersionPackages: map[string][]FreezeVersionPackage{
+			"npm": {
+				{Name: "lodash", Version: "4.17.21", Note: "stable"},
+				{Name: "react", Version: "18.2.0"},
+			},
+			"packagist": {
+				{Name: "monolog/monolog", Version: "3.0.0", Note: "last working"},
+			},
+		},
+	}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() after Save() error: %v", err)
+	}
+
+	for reg, wantPkgs := range want.FreezeVersionPackages {
+		gotPkgs, ok := got.FreezeVersionPackages[reg]
+		if !ok {
+			t.Errorf("missing registry %q in loaded config", reg)
+			continue
+		}
+		if len(gotPkgs) != len(wantPkgs) {
+			t.Errorf("registry %q: got %d packages, want %d", reg, len(gotPkgs), len(wantPkgs))
+			continue
+		}
+		for i, wantP := range wantPkgs {
+			gotP := gotPkgs[i]
+			if gotP.Name != wantP.Name || gotP.Version != wantP.Version || gotP.Note != wantP.Note {
+				t.Errorf("registry %q[%d] = %+v, want %+v", reg, i, gotP, wantP)
+			}
+		}
+	}
+}
+
+func TestSaveLoad_FreezeVersionPackages_Empty(t *testing.T) {
+	setupTempHome(t)
+
+	if err := Save(Config{}); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(got.FreezeVersionPackages) != 0 {
+		t.Errorf("expected empty FreezeVersionPackages, got %+v", got.FreezeVersionPackages)
+	}
+}
+
 func TestSave_OverwritesPreviousValue(t *testing.T) {
 	setupTempHome(t)
 

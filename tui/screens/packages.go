@@ -63,6 +63,13 @@ type debounceMsg struct {
 	query string
 }
 
+type freezeActionMsg struct {
+	action     string // "frozen" or "unfrozen"
+	name       string
+	err        error
+	freezeData map[string]config.FreezeVersionPackage
+}
+
 func searchCmd(query string, isPhp bool) tea.Cmd {
 	return func() tea.Msg {
 		var results []packages.Package
@@ -80,6 +87,71 @@ func debounceCmd(query string) tea.Cmd {
 	return tea.Tick(PACKAGES_DEBOUNCE, func(time.Time) tea.Msg {
 		return debounceMsg{query: query}
 	})
+}
+
+func freezeTuiCmd(name, version, note string, isPhp bool) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.Load()
+		if err != nil {
+			return freezeActionMsg{action: "frozen", name: name, err: err}
+		}
+		if cfg.FreezeVersionPackages == nil {
+			cfg.FreezeVersionPackages = make(map[string][]config.FreezeVersionPackage)
+		}
+		reg := "npm"
+		if isPhp {
+			reg = "packagist"
+		}
+		fp := config.FreezeVersionPackage{Name: name, Version: version, Note: note}
+		exists := false
+		for i, f := range cfg.FreezeVersionPackages[reg] {
+			if f.Name == name {
+				cfg.FreezeVersionPackages[reg][i] = fp
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			cfg.FreezeVersionPackages[reg] = append(cfg.FreezeVersionPackages[reg], fp)
+		}
+		if err := config.Save(cfg); err != nil {
+			return freezeActionMsg{action: "frozen", name: name, err: err}
+		}
+		return freezeActionMsg{action: "frozen", name: name, freezeData: loadFreezeData()}
+	}
+}
+
+func unfreezeTuiCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.Load()
+		if err != nil {
+			return freezeActionMsg{action: "unfrozen", name: name, err: err}
+		}
+		found := false
+		for reg, pkgs := range cfg.FreezeVersionPackages {
+			for i, p := range pkgs {
+				if p.Name == name {
+					if len(pkgs) == 1 {
+						delete(cfg.FreezeVersionPackages, reg)
+					} else {
+						cfg.FreezeVersionPackages[reg] = append(pkgs[:i], pkgs[i+1:]...)
+					}
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return freezeActionMsg{action: "unfrozen", name: name, err: fmt.Errorf("not frozen")}
+		}
+		if err := config.Save(cfg); err != nil {
+			return freezeActionMsg{action: "unfrozen", name: name, err: err}
+		}
+		return freezeActionMsg{action: "unfrozen", name: name, freezeData: loadFreezeData()}
+	}
 }
 
 type PackagesModel struct {
@@ -112,12 +184,27 @@ type PackagesModel struct {
 	backCancelled bool
 
 	savedCart      []packages.Package
-	freezeVersions map[string]string
+	freezeData     map[string]config.FreezeVersionPackage
+	freezeStatus   string
+
+	// Freeze view
+	inFreezeView    bool
+	freezeViewCursor int
+
+	// Version selection
+	selectVersion    bool
+	versionCursor    int
+	versionList      []string
+	freezeTargetName string
+
+	// Note input
+	inputNote  bool
+	noteBuffer string
 }
 
 func NewPackages(width, height int, framework registry.Framework, targetDir string) PackagesModel {
 	isPhp := framework.Ecosystem == "php"
-	freezeVersions := loadFreezeVersions()
+	freezeData := loadFreezeData()
 	return PackagesModel{
 		width:           width,
 		height:          height,
@@ -127,7 +214,7 @@ func NewPackages(width, height int, framework registry.Framework, targetDir stri
 		initialPrompt:   true,
 		loadingDefaults: true,
 		favorites:       []packages.Package{},
-		freezeVersions:  freezeVersions,
+		freezeData:  freezeData,
 	}
 }
 
@@ -135,7 +222,7 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 	isPhp := framework.Ecosystem == "php"
 	saved := make([]packages.Package, len(cart))
 	copy(saved, cart)
-	freezeVersions := loadFreezeVersions()
+	freezeData := loadFreezeData()
 	return PackagesModel{
 		width:           width,
 		height:          height,
@@ -147,22 +234,22 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 		favorites:       []packages.Package{},
 		cart:            append([]packages.Package{}, cart...),
 		savedCart:       saved,
-		freezeVersions:  freezeVersions,
+		freezeData:  freezeData,
 	}
 }
 
-func loadFreezeVersions() map[string]string {
+func loadFreezeData() map[string]config.FreezeVersionPackage {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil
 	}
-	freezeVersions := make(map[string]string)
+	freezeData := make(map[string]config.FreezeVersionPackage)
 	for _, pkgs := range cfg.FreezeVersionPackages {
 		for _, p := range pkgs {
-			freezeVersions[p.Name] = p.Version
+			freezeData[p.Name] = p
 		}
 	}
-	return freezeVersions
+	return freezeData
 }
 
 func (m *PackagesModel) SetSize(width, height int) {
@@ -195,6 +282,21 @@ func (m PackagesModel) getFilteredFavorites() []packages.Package {
 	return filtered
 }
 
+func (m PackagesModel) getFilteredFrozen() []frozenViewEntry {
+	entries := m.frozenPackagesList()
+	if m.query == "" {
+		return entries
+	}
+	var filtered []frozenViewEntry
+	q := strings.ToLower(m.query)
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Description), q) {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
 func (m PackagesModel) Init() tea.Cmd {
 	return tea.Batch(loadDefaultsCmd(m.framework.ID, m.isPhp), loadFavoritesCmd(m.framework.ID))
 }
@@ -204,6 +306,25 @@ func (m PackagesModel) currentPackage() (packages.Package, bool) {
 		return packages.Package{}, false
 	}
 	return m.results[m.cursor], true
+}
+
+func (m PackagesModel) findPackageByName(name string) *packages.Package {
+	for _, p := range m.results {
+		if p.Name == name {
+			return &p
+		}
+	}
+	for _, p := range m.defaults {
+		if p.Name == name {
+			return &p
+		}
+	}
+	for _, p := range m.favorites {
+		if p.Name == name {
+			return &p
+		}
+	}
+	return nil
 }
 
 func (m PackagesModel) isInCart(name string) bool {
@@ -222,8 +343,8 @@ func (m *PackagesModel) toggleCart(pkg packages.Package) {
 			return
 		}
 	}
-	if ver, ok := m.freezeVersions[pkg.Name]; ok {
-		pkg.PinnedVersion = ver
+	if fd, ok := m.freezeData[pkg.Name]; ok {
+		pkg.PinnedVersion = fd.Version
 	}
 	m.cart = append(m.cart, pkg)
 }
@@ -235,6 +356,53 @@ func (m PackagesModel) isFavorite(name string) bool {
 		}
 	}
 	return false
+}
+
+type frozenViewEntry struct {
+	Name        string
+	Version     string
+	Note        string
+	Description string
+}
+
+func (m PackagesModel) frozenPackagesList() []frozenViewEntry {
+	var entries []frozenViewEntry
+	seen := make(map[string]bool)
+	// Collect from search results if available
+	for _, p := range m.results {
+		if fd, ok := m.freezeData[p.Name]; ok && !seen[p.Name] {
+			seen[p.Name] = true
+			entries = append(entries, frozenViewEntry{
+				Name:        p.Name,
+				Version:     fd.Version,
+				Note:        fd.Note,
+				Description: p.Description,
+			})
+		}
+	}
+	// Also from defaults
+	for _, p := range m.defaults {
+		if fd, ok := m.freezeData[p.Name]; ok && !seen[p.Name] {
+			seen[p.Name] = true
+			entries = append(entries, frozenViewEntry{
+				Name:        p.Name,
+				Version:     fd.Version,
+				Note:        fd.Note,
+				Description: p.Description,
+			})
+		}
+	}
+	// Any remaining from freezeData not in results/defaults
+	for name, fd := range m.freezeData {
+		if !seen[name] {
+			entries = append(entries, frozenViewEntry{
+				Name:    name,
+				Version: fd.Version,
+				Note:    fd.Note,
+			})
+		}
+	}
+	return entries
 }
 
 func (m *PackagesModel) toggleFavorite(pkg packages.Package) tea.Cmd {
@@ -303,25 +471,121 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 		m.results = msg.results
 		m.cursor = 0
 
+	case freezeActionMsg:
+		if msg.err != nil {
+			m.freezeStatus = "Error: " + msg.err.Error()
+		} else if msg.freezeData != nil {
+			m.freezeData = msg.freezeData
+			if msg.action == "frozen" {
+				m.freezeStatus = "❄ Frozen " + msg.name
+			} else {
+				m.freezeStatus = "Unfrozen " + msg.name
+			}
+		}
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
-			if len(m.cart) > 0 {
-				m.inCartMode = !m.inCartMode
-				if m.inCartMode {
-					m.cartCursor = 0
-				}
+			if m.inCartMode {
+				m.inCartMode = false
+			} else if m.inFavoritesMode {
+				m.inFavoritesMode = false
+			} else if len(m.cart) > 0 {
+				m.inCartMode = true
+				m.cartCursor = 0
 			}
-		case "ctrl+f":
-			m.inFavoritesMode = !m.inFavoritesMode
+
+		case "ctrl+x":
+			if m.inFreezeView {
+				m.inFreezeView = false
+			}
+			if m.inFavoritesMode {
+				m.inFavoritesMode = false
+				break
+			}
+			if len(m.favorites) == 0 {
+				m.freezeStatus = "No favorites yet"
+				break
+			}
+			m.inFavoritesMode = true
 			m.inCartMode = false
 			m.favoritesCursor = 0
 			m.query = ""
 			m.queryPos = 0
 			m.initialPrompt = m.query == ""
 			m.searching = false
+			m.freezeStatus = ""
+
+		case "ctrl+b":
+			if m.inFavoritesMode || m.inCartMode {
+				break
+			}
+			if m.inFreezeView {
+				m.inFreezeView = false
+				break
+			}
+			if len(m.freezeData) == 0 {
+				m.freezeStatus = "No frozen packages"
+				break
+			}
+			m.inFreezeView = true
+			m.freezeViewCursor = 0
+			m.freezeStatus = ""
+
+		case "ctrl+g":
+			if m.inFreezeView {
+				frozenEntries := m.frozenPackagesList()
+				if len(frozenEntries) > 0 && m.freezeViewCursor < len(frozenEntries) {
+					entry := frozenEntries[m.freezeViewCursor]
+					m.freezeStatus = "Unfreezing " + entry.Name + "..."
+					m.inFreezeView = false
+					return m, unfreezeTuiCmd(entry.Name)
+				}
+				break
+			}
+			if m.inCartMode || m.inFavoritesMode {
+				break
+			}
+			if m.selectVersion || m.inputNote {
+				break
+			}
+			if pkg, ok := m.currentPackage(); ok {
+				if _, isFrozen := m.freezeData[pkg.Name]; isFrozen {
+					m.freezeStatus = "Unfreezing " + pkg.Name + "..."
+					return m, unfreezeTuiCmd(pkg.Name)
+				}
+				if len(pkg.Versions) == 0 {
+					m.freezeStatus = "No versions available for " + pkg.Name
+					break
+				}
+				m.freezeTargetName = pkg.Name
+				m.versionList = pkg.Versions
+				m.versionCursor = 0
+				m.selectVersion = true
+				m.freezeStatus = ""
+			}
 
 		case "esc":
+			if m.inputNote {
+				m.inputNote = false
+				m.noteBuffer = ""
+				break
+			}
+			if m.selectVersion {
+				m.selectVersion = false
+				m.versionList = nil
+				m.freezeTargetName = ""
+				break
+			}
+			if m.inFreezeView {
+				if m.query != "" {
+					m.query = ""
+					m.queryPos = 0
+				} else {
+					m.inFreezeView = false
+				}
+				break
+			}
 			if m.inCartMode || m.inFavoritesMode {
 				m.inCartMode = false
 				m.inFavoritesMode = false
@@ -340,8 +604,42 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.backPressed = true
 			}
 		case "enter":
+			if m.inputNote {
+				ver := m.versionList[m.versionCursor]
+				m.inputNote = false
+				m.selectVersion = false
+				m.versionList = nil
+				name := m.freezeTargetName
+				note := strings.TrimSpace(m.noteBuffer)
+				m.noteBuffer = ""
+				m.freezeTargetName = ""
+				m.freezeStatus = "Freezing " + name + "..."
+				return m, freezeTuiCmd(name, ver, note, m.isPhp)
+			}
+			if m.selectVersion {
+				if len(m.versionList) > 0 && m.versionCursor < len(m.versionList) {
+					m.selectVersion = false
+					m.inputNote = true
+					m.noteBuffer = ""
+				}
+				break
+			}
 			m.done = true
 		case " ":
+			if m.inFreezeView {
+				frozenEntries := m.frozenPackagesList()
+				if len(frozenEntries) > 0 && m.freezeViewCursor < len(frozenEntries) {
+					entry := frozenEntries[m.freezeViewCursor]
+					name := entry.Name
+					desc := entry.Description
+					pkg := packages.Package{Name: name, Description: desc}
+					if fd, ok := m.freezeData[name]; ok {
+						pkg.PinnedVersion = fd.Version
+					}
+					m.toggleCart(pkg)
+				}
+				break
+			}
 			if m.inCartMode {
 				if len(m.cart) > 0 {
 					pkg := m.cart[m.cartCursor]
@@ -354,7 +652,6 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 					}
 					if len(m.cart) == 0 {
 						m.inCartMode = false
-						m.inFavoritesMode = true
 					}
 				}
 			} else if m.inFavoritesMode {
@@ -368,11 +665,30 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 					m.toggleCart(pkg)
 				}
 			}
-		case "f", "F":
+		case "ctrl+f":
+			if m.inFreezeView {
+				frozenEntries := m.frozenPackagesList()
+				if len(frozenEntries) > 0 && m.freezeViewCursor < len(frozenEntries) {
+					entry := frozenEntries[m.freezeViewCursor]
+					if m.isFavorite(entry.Name) {
+						m.freezeStatus = "Unfavorited " + entry.Name
+					} else {
+						m.freezeStatus = "★ Favorited " + entry.Name
+					}
+					pkg := packages.Package{Name: entry.Name, Description: entry.Description}
+					return m, m.toggleFavorite(pkg)
+				}
+				break
+			}
 			if m.inFavoritesMode {
 				favs := m.getFilteredFavorites()
 				if len(favs) > 0 && m.favoritesCursor < len(favs) {
 					pkg := favs[m.favoritesCursor]
+					if m.isFavorite(pkg.Name) {
+						m.freezeStatus = "Unfavorited " + pkg.Name
+					} else {
+						m.freezeStatus = "★ Favorited " + pkg.Name
+					}
 					cmd := m.toggleFavorite(pkg)
 					favs = m.getFilteredFavorites()
 					if m.favoritesCursor >= len(favs) {
@@ -386,24 +702,31 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 			} else if m.inCartMode {
 				if len(m.cart) > 0 {
 					pkg := m.cart[m.cartCursor]
+					if m.isFavorite(pkg.Name) {
+						m.freezeStatus = "Unfavorited " + pkg.Name
+					} else {
+						m.freezeStatus = "★ Favorited " + pkg.Name
+					}
 					return m, m.toggleFavorite(pkg)
 				}
 			} else {
-				if !m.initialPrompt && m.query != "" && (msg.String() == "f" || msg.String() == "F") {
-					runes := []rune(m.query)
-					m.query = string(append(runes[:m.queryPos], append([]rune{rune(msg.String()[0])}, runes[m.queryPos:]...)...))
-					m.queryPos++
-					m.initialPrompt = false
-					m.searching = true
-					m.cursor = 0
-					return m, debounceCmd(m.query)
-				}
 				if pkg, ok := m.currentPackage(); ok {
+					if m.isFavorite(pkg.Name) {
+						m.freezeStatus = "Unfavorited " + pkg.Name
+					} else {
+						m.freezeStatus = "★ Favorited " + pkg.Name
+					}
 					return m, m.toggleFavorite(pkg)
 				}
 			}
 		case "up", "k":
-			if msg.String() == "k" && !m.inCartMode && !m.inFavoritesMode {
+			if m.selectVersion {
+				if m.versionCursor > 0 {
+					m.versionCursor--
+				}
+				break
+			}
+			if msg.String() == "k" && !m.inCartMode && !m.inFavoritesMode && !m.inFreezeView && !m.inputNote {
 				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos], append([]rune{'k'}, runes[m.queryPos:]...)...))
 				m.queryPos++
@@ -412,7 +735,11 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.cursor = 0
 				return m, debounceCmd(m.query)
 			}
-			if m.inCartMode {
+			if m.inFreezeView {
+				if m.freezeViewCursor > 0 {
+					m.freezeViewCursor--
+				}
+			} else if m.inCartMode {
 				if m.cartCursor > 0 {
 					m.cartCursor--
 				}
@@ -426,7 +753,13 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "down", "j":
-			if msg.String() == "j" && !m.inCartMode && !m.inFavoritesMode {
+			if m.selectVersion {
+				if m.versionCursor < len(m.versionList)-1 {
+					m.versionCursor++
+				}
+				break
+			}
+			if msg.String() == "j" && !m.inCartMode && !m.inFavoritesMode && !m.inFreezeView && !m.inputNote {
 				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos], append([]rune{'j'}, runes[m.queryPos:]...)...))
 				m.queryPos++
@@ -435,7 +768,12 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.cursor = 0
 				return m, debounceCmd(m.query)
 			}
-			if m.inCartMode {
+			if m.inFreezeView {
+				frozenEntries := m.frozenPackagesList()
+				if m.freezeViewCursor < len(frozenEntries)-1 {
+					m.freezeViewCursor++
+				}
+			} else if m.inCartMode {
 				if m.cartCursor < len(m.cart)-1 {
 					m.cartCursor++
 				}
@@ -461,6 +799,13 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				}
 			}
 		case "backspace":
+			if m.inputNote {
+				runes := []rune(m.noteBuffer)
+				if len(runes) > 0 {
+					m.noteBuffer = string(runes[:len(runes)-1])
+				}
+				break
+			}
 			if m.inCartMode {
 				break
 			}
@@ -469,40 +814,51 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				m.query = string(append(runes[:m.queryPos-1], runes[m.queryPos:]...))
 				m.queryPos--
 				m.initialPrompt = m.query == ""
-				if m.query == "" {
+				if m.query == "" && !m.inFreezeView {
 					m.results = m.defaults
 					m.searching = false
 					m.searchErr = nil
 					m.cursor = 0
-				} else {
+				} else if !m.inFreezeView {
 					return m, debounceCmd(m.query)
 				}
 			}
 		case "delete":
+			if m.inputNote {
+				break
+			}
 			m.inCartMode = false
 			runes := []rune(m.query)
 			if m.queryPos < len(runes) {
 				m.query = string(append(runes[:m.queryPos], runes[m.queryPos+1:]...))
 				m.initialPrompt = m.query == ""
-				if m.query == "" {
+				if m.query == "" && !m.inFreezeView {
 					m.results = m.defaults
 					m.searching = false
 					m.searchErr = nil
 					m.cursor = 0
-				} else {
+				} else if !m.inFreezeView {
 					return m, debounceCmd(m.query)
 				}
 			}
 		default:
+			if m.inputNote {
+				if len(msg.Runes) > 0 {
+					m.noteBuffer += string(msg.Runes)
+				}
+				break
+			}
 			if len(msg.Runes) > 0 {
 				m.inCartMode = false
 				runes := []rune(m.query)
 				m.query = string(append(runes[:m.queryPos], append(msg.Runes, runes[m.queryPos:]...)...))
 				m.queryPos += len(msg.Runes)
 				m.initialPrompt = false
-				m.searching = true
-				m.cursor = 0
-				return m, debounceCmd(m.query)
+				if !m.inFreezeView {
+					m.searching = true
+					m.cursor = 0
+					return m, debounceCmd(m.query)
+				}
 			}
 		}
 	}
@@ -552,17 +908,38 @@ func (m PackagesModel) View() string {
 
 	sb.WriteString(box + "\n\n")
 
+	if m.inputNote {
+		prompt := styles.MutedStyle.Render("  Reason for freezing " + m.freezeTargetName + ": ")
+		input := styles.TitleStyle.Render(m.noteBuffer)
+		if m.noteBuffer == "" {
+			input = styles.DimStyle.Render("type and press enter…") + styles.TitleStyle.Render("_")
+		}
+		sb.WriteString(prompt + "\n")
+		sb.WriteString("  " + input + "\n\n")
+	}
+
 	var hints string
-	if m.inCartMode {
-		hints = "  [↑↓] navigate cart   [space] remove   [f] favorite   [tab] focus search   [ctrl+f] favorites   [↵] confirm   [ctrl+c] quit"
+	if m.inFreezeView {
+		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] favorite   [ctrl+g] unfreeze   [ctrl+b] close   [esc] back   [ctrl+c] quit"
+	} else if m.inCartMode {
+		hints = "  [↑↓] navigate cart   [space] remove   [ctrl+f] favorite   [tab] focus search   [ctrl+x] favorites   [↵] confirm   [ctrl+c] quit"
 	} else if m.inFavoritesMode {
-		hints = "  [↑↓] navigate   [space] toggle   [f] remove   [tab] focus cart   [ctrl+f] close   [↵] confirm   [ctrl+c] quit"
-	} else if m.query != "" {
-		hints = "  [↑↓] navigate   [space] toggle   [f] favorite   [tab] focus cart   [ctrl+f] favorites   [esc] clear   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] remove   [tab] focus cart   [ctrl+x] close   [↵] confirm   [ctrl+c] quit"
+	} else if m.selectVersion {
+		hints = "  [↑↓] choose version   [enter] confirm   [esc] cancel"
+	} else if m.inputNote {
+		hints = "  [enter] confirm   [esc] skip"
 	} else {
-		hints = "  [↑↓] navigate   [space] toggle   [f] favorite   [tab] focus cart   [ctrl+f] favorites   [esc] back   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] fav   [tab] focus cart   [ctrl+x] favs   [ctrl+b] frozen   [ctrl+g] freeze   [↵] confirm   [ctrl+c] quit"
+		if m.query != "" {
+			hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] fav   [tab] focus cart   [ctrl+x] favs   [ctrl+b] frozen   [ctrl+g] freeze   [esc] clear   [↵] confirm   [ctrl+c] quit"
+		}
 	}
 	sb.WriteString(styles.MutedStyle.Render(hints) + "\n")
+
+	if m.freezeStatus != "" {
+		sb.WriteString(styles.SubtitleStyle.Render("  " + m.freezeStatus) + "\n")
+	}
 
 	return sb.String()
 }
@@ -571,6 +948,69 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 	var sb strings.Builder
 
 	sepWidth := listWidth - 2
+
+	if m.inFreezeView {
+		sb.WriteString(styles.SelectedStyle.Render(fmt.Sprintf(" Frozen (%d)", len(m.freezeData))) + "\n")
+		if m.query == "" {
+			sb.WriteString(styles.MutedStyle.Render(" Search: ") + styles.DimStyle.Render("type to filter…") + styles.TitleStyle.Render("_") + "\n")
+		} else {
+			sb.WriteString(styles.MutedStyle.Render(" Search: ") + renderTextInput(m.query, m.queryPos) + "\n")
+		}
+		separator := styles.DimStyle.Render(strings.Repeat("─", sepWidth))
+		sb.WriteString(separator + "\n")
+
+		entries := m.getFilteredFrozen()
+		if len(entries) == 0 {
+			sb.WriteString(styles.DimStyle.Render(" No frozen packages.") + "\n")
+			return sb.String()
+		}
+
+		total := len(entries)
+		windowStart, windowEnd := scrollWindow(m.freezeViewCursor, total, visible)
+
+		if windowStart > 0 {
+			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↑ %d more", windowStart)) + "\n")
+		}
+		if windowEnd > total {
+			windowEnd = total
+		}
+
+		for i, entry := range entries[windowStart:windowEnd] {
+			absIdx := windowStart + i
+			inCart := m.isInCart(entry.Name)
+
+			var checkbox string
+			if inCart {
+				checkbox = styles.SelectedStyle.Render("[x]")
+			} else {
+				checkbox = styles.DimStyle.Render("[ ]")
+			}
+
+			isFav := m.isFavorite(entry.Name)
+			var favIcon string
+			if isFav {
+				favIcon = styles.SelectedStyle.Render(" ★")
+			} else {
+				favIcon = "  "
+			}
+
+			if absIdx == m.freezeViewCursor {
+				label := styles.SelectedStyle.Render(entry.Name)
+				line := fmt.Sprintf(" %s %s%s", checkbox, label, favIcon)
+				sb.WriteString(styles.CursorStyle.Render(" ❯❯") + line + "\n")
+			} else {
+				label := styles.DimStyle.Render(entry.Name)
+				line := fmt.Sprintf("    %s %s%s", checkbox, label, favIcon)
+				sb.WriteString(line + "\n")
+			}
+		}
+
+		if windowEnd < total {
+			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↓ %d more", total-windowEnd)) + "\n")
+		}
+
+		return sb.String()
+	}
 
 	if m.inFavoritesMode {
 		sb.WriteString(styles.SelectedStyle.Render(fmt.Sprintf(" Favorites (%d)", len(m.favorites))) + "\n")
@@ -612,14 +1052,19 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 			
 			favIcon := styles.SelectedStyle.Render(" ★")
 
+			frozenBadge := ""
+			if _, ok := m.freezeData[pkg.Name]; ok {
+				frozenBadge = styles.MutedStyle.Render(" ❄")
+			}
+
 			if absIdx == m.favoritesCursor {
 				cur := styles.CursorStyle.Render(" ❯❯")
 				label := styles.SelectedStyle.Render(pkg.Name)
-				line := fmt.Sprintf("%s %s %s%s", cur, checkbox, label, favIcon)
+				line := fmt.Sprintf("%s %s %s%s%s", cur, checkbox, label, favIcon, frozenBadge)
 				sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
 			} else {
 				label := styles.DimStyle.Render(pkg.Name)
-				line := fmt.Sprintf("    %s %s%s", checkbox, label, favIcon)
+				line := fmt.Sprintf("    %s %s%s%s", checkbox, label, favIcon, frozenBadge)
 				sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
 			}
 		}
@@ -694,7 +1139,12 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 			favIcon = "  "
 		}
 
-		if absIdx == m.cursor {
+			frozenBadge := ""
+			if _, ok := m.freezeData[pkg.Name]; ok {
+				frozenBadge = styles.MutedStyle.Render(" ❄")
+			}
+
+			if absIdx == m.cursor {
 			var cur string
 			if m.inCartMode || m.inFavoritesMode {
 				cur = styles.DimStyle.Render(" ❯❯")
@@ -702,11 +1152,11 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 				cur = styles.CursorStyle.Render(" ❯❯")
 			}
 			label := styles.SelectedStyle.Render(pkg.Name)
-			line := fmt.Sprintf("%s %s %s%s", cur, checkbox, label, favIcon)
+			line := fmt.Sprintf("%s %s %s%s%s", cur, checkbox, label, favIcon, frozenBadge)
 			sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
 		} else {
 			label := styles.DimStyle.Render(pkg.Name)
-			line := fmt.Sprintf("    %s %s%s", checkbox, label, favIcon)
+			line := fmt.Sprintf("    %s %s%s%s", checkbox, label, favIcon, frozenBadge)
 			sb.WriteString(lipgloss.NewStyle().Width(listWidth).Render(line) + "\n")
 		}
 	}
@@ -721,19 +1171,127 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 func (m PackagesModel) renderDetail(panelWidth int) string {
 	var sb strings.Builder
 
+	if m.selectVersion {
+		sb.WriteString(styles.TitleStyle.Render("Select version for " + m.freezeTargetName) + "\n")
+		sb.WriteString("\n")
+		total := len(m.versionList)
+		visible := 12
+		windowStart, windowEnd := scrollWindow(m.versionCursor, total, visible)
+		if windowStart > 0 {
+			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↑ %d more", windowStart)) + "\n")
+		}
+		if windowEnd > total {
+			windowEnd = total
+		}
+		for i, ver := range m.versionList[windowStart:windowEnd] {
+			absIdx := windowStart + i
+			if absIdx == m.versionCursor {
+				sb.WriteString(styles.CursorStyle.Render(" ❯❯ ") + styles.SelectedStyle.Render(ver) + "\n")
+			} else {
+				sb.WriteString(styles.DimStyle.Render("    ") + ver + "\n")
+			}
+		}
+		if windowEnd < total {
+			sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("    ↓ %d more", total-windowEnd)) + "\n")
+		}
+		return sb.String()
+	}
+
+	if m.inFreezeView {
+		entries := m.frozenPackagesList()
+		if len(entries) > 0 && m.freezeViewCursor < len(entries) {
+			entry := entries[m.freezeViewCursor]
+			pkg := m.findPackageByName(entry.Name)
+			if pkg != nil {
+				sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")
+				sb.WriteString(styles.DimStyle.Render(pkg.Description) + "\n")
+				sb.WriteString("\n")
+				sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(entry.Version) + styles.MutedStyle.Render("  🔒") + "\n")
+				if entry.Note != "" {
+					sb.WriteString(styles.MutedStyle.Render("Note     ") + styles.DimStyle.Render(entry.Note) + "\n")
+				}
+				if pkg.Stars > 0 {
+					sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(pkg.Stars)) + "\n")
+				}
+				if pkg.Weekly > 0 {
+					label := "Weekly   "
+					if m.isPhp {
+						label = "Total    "
+					}
+					sb.WriteString(styles.MutedStyle.Render(label) + styles.MutedStyle.Render(formatNum(pkg.Weekly)) + "\n")
+				}
+				if pkg.GithubRepo != "" {
+					sb.WriteString("\n" + styles.LinkStyle.Render("github.com/"+pkg.GithubRepo) + "\n")
+				}
+			} else {
+				sb.WriteString(styles.TitleStyle.Render(entry.Name) + "\n")
+				sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(entry.Version) + styles.MutedStyle.Render("  🔒") + "\n")
+				if entry.Note != "" {
+					sb.WriteString(styles.MutedStyle.Render("Note     ") + styles.DimStyle.Render(entry.Note) + "\n")
+				}
+			}
+		} else {
+			sb.WriteString(styles.DimStyle.Render("No frozen packages") + "\n")
+		}
+
+		sb.WriteString("\n")
+		separator := styles.DimStyle.Render(strings.Repeat("─", panelWidth-4))
+		sb.WriteString(separator + "\n")
+
+		cartLabel := fmt.Sprintf("Cart (%d)", len(m.cart))
+		if m.inCartMode {
+			cartLabel = styles.SelectedStyle.Render(cartLabel)
+		} else {
+			cartLabel = styles.MutedStyle.Render(cartLabel)
+		}
+		sb.WriteString(cartLabel + "\n")
+
+		if len(m.cart) == 0 {
+			sb.WriteString(styles.DimStyle.Render("  empty") + "\n")
+		} else {
+			const visibleCart = 6
+			total := len(m.cart)
+			windowStart, windowEnd := scrollWindow(m.cartCursor, total, visibleCart)
+			if windowStart > 0 {
+				sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("  ↑ %d more", windowStart)) + "\n")
+			}
+			for i, p := range m.cart[windowStart:windowEnd] {
+				absIdx := windowStart + i
+				if m.inCartMode && absIdx == m.cartCursor {
+					cur := styles.CursorStyle.Render("❯")
+					fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render("· "+p.Name))
+				} else {
+					sb.WriteString(styles.SelectedStyle.Render("  · ") + styles.DimStyle.Render(p.Name) + "\n")
+				}
+			}
+			if windowEnd < total {
+				sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("  ↓ %d more", total-windowEnd)) + "\n")
+			}
+		}
+		return sb.String()
+	}
+
 	pkg, ok := m.currentPackage()
 	if ok {
 		sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")
 		sb.WriteString(styles.DimStyle.Render(pkg.Description) + "\n")
 		sb.WriteString("\n")
 		displayVersion := ""
-		if frozenVer, ok := m.freezeVersions[pkg.Name]; ok {
-			displayVersion = frozenVer
+		fd, isFrozen := m.freezeData[pkg.Name]
+		if isFrozen {
+			displayVersion = fd.Version
 		} else if len(pkg.Versions) > 0 {
 			displayVersion = pkg.Versions[0]
 		}
 		if displayVersion != "" {
-			sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(displayVersion) + "\n")
+			versionLabel := styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(displayVersion)
+			if isFrozen {
+				versionLabel += styles.MutedStyle.Render("  🔒")
+			}
+			sb.WriteString(versionLabel + "\n")
+		}
+		if isFrozen && fd.Note != "" {
+			sb.WriteString(styles.MutedStyle.Render("Note     ") + styles.DimStyle.Render(fd.Note) + "\n")
 		}
 		if pkg.Stars > 0 {
 			sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(pkg.Stars)) + "\n")
