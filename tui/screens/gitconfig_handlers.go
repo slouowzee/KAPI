@@ -290,7 +290,7 @@ func (m GitConfigModel) handleSigningKey(msg tea.KeyMsg) (GitConfigModel, tea.Cm
 			return m, runKeyGenCmd(m.signingFormat)
 		}
 		m.signingKey = selected
-		if (m.signingFormat == "ssh" && m.scopes.WritePublicKey) || (m.signingFormat == "gpg" && m.scopes.WriteGPGKey) {
+		if (m.signingFormat == "ssh" && m.scopes.WriteSSHSigningKey) || (m.signingFormat == "gpg" && m.scopes.WriteGPGKey) {
 			m.step = GITCFG_STEP_SIGNING_PUSH_GITHUB
 			m.execMsg = "Configuring signing..."
 			return m, execGitSigningCmd(m.dir, m.signingFormat, m.signingScope, m.signingKey)
@@ -374,13 +374,13 @@ func (m GitConfigModel) handleManageList(msg tea.KeyMsg) (GitConfigModel, tea.Cm
 		if selected == signingGenSentinel {
 			return m, runKeyGenCmd(m.manageFormat)
 		}
-		if (m.manageFormat == "ssh" && m.scopes.WritePublicKey) || (m.manageFormat == "gpg" && m.scopes.WriteGPGKey) {
+		if (m.manageFormat == "ssh" && m.scopes.WriteSSHSigningKey) || (m.manageFormat == "gpg" && m.scopes.WriteGPGKey) {
 			m.step = GITCFG_STEP_MANAGE_PUSH_GITHUB
 			m.execMsg = "Pushing key to GitHub..."
 			return m, execGithubPushKeyCmd(m.manageFormat, selected, "KAPI Manage Key")
 		}
 		m.lastErr = errors.New("missing GitHub scope to push key")
-		m.lastMsg = "Missing GitHub scope (requires write:public_key or write:gpg_key)"
+		m.lastMsg = "Missing GitHub scope (requires write:ssh_signing_key or write:gpg_key)"
 	}
 	return m, nil
 }

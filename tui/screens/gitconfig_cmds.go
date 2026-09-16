@@ -421,7 +421,9 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 		var reqBody []byte
 
 		if format == "ssh" {
-			endpoint = "https://api.github.com/user/keys"
+			// NOTE: /user/keys registers authentication keys; commits signed with
+			// them would show as unverified.
+			endpoint = "https://api.github.com/user/ssh_signing_keys"
 			content, err := os.ReadFile(key)
 			if err != nil {
 				return gitcfgGithubPushDoneMsg{err: fmt.Errorf("could not read SSH public key: %w", err)}

@@ -40,10 +40,12 @@ func ghAuthToken() string {
 	return strings.TrimSpace(string(out))
 }
 
+// TokenScopes lists the classic token scopes kapi relies on. SSH keys are
+// registered as signing keys, which GitHub requires to verify signed commits.
 type TokenScopes struct {
-	Repo           bool
-	WritePublicKey bool
-	WriteGPGKey    bool
+	Repo               bool
+	WriteSSHSigningKey bool
+	WriteGPGKey        bool
 }
 
 func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
@@ -80,8 +82,8 @@ func FetchTokenScopes(ctx context.Context) (TokenScopes, error) {
 		switch strings.TrimSpace(scope) {
 		case "repo":
 			s.Repo = true
-		case "write:public_key", "admin:public_key":
-			s.WritePublicKey = true
+		case "write:ssh_signing_key", "admin:ssh_signing_key":
+			s.WriteSSHSigningKey = true
 		case "write:gpg_key", "admin:gpg_key":
 			s.WriteGPGKey = true
 		}

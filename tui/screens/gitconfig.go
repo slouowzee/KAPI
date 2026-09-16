@@ -312,7 +312,7 @@ func (m GitConfigModel) isActionDisabled(action int) bool {
 	}
 	switch action {
 	case GITCFG_ACTION_SIGNING:
-		return !m.scopes.WritePublicKey && !m.scopes.WriteGPGKey
+		return !m.scopes.WriteSSHSigningKey && !m.scopes.WriteGPGKey
 	}
 	return false
 }

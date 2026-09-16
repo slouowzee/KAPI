@@ -235,7 +235,7 @@ func TestFetchTokenScopes_AllScopes(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "valid-token")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-OAuth-Scopes", "repo, write:public_key, write:gpg_key")
+		w.Header().Set("X-OAuth-Scopes", "repo, write:ssh_signing_key, write:gpg_key")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
@@ -246,7 +246,7 @@ func TestFetchTokenScopes_AllScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchTokenScopes() unexpected error: %v", err)
 	}
-	want := TokenScopes{Repo: true, WritePublicKey: true, WriteGPGKey: true}
+	want := TokenScopes{Repo: true, WriteSSHSigningKey: true, WriteGPGKey: true}
 	if got != want {
 		t.Errorf("FetchTokenScopes() = %+v, want %+v", got, want)
 	}
@@ -257,7 +257,7 @@ func TestFetchTokenScopes_AdminScopeAliases(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "valid-token")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-OAuth-Scopes", "admin:public_key, admin:gpg_key")
+		w.Header().Set("X-OAuth-Scopes", "admin:ssh_signing_key, admin:gpg_key")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
@@ -268,7 +268,7 @@ func TestFetchTokenScopes_AdminScopeAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchTokenScopes() unexpected error: %v", err)
 	}
-	if !got.WritePublicKey || !got.WriteGPGKey {
+	if !got.WriteSSHSigningKey || !got.WriteGPGKey {
 		t.Errorf("admin:* alias not recognised: %+v", got)
 	}
 }
