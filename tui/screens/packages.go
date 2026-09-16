@@ -91,27 +91,30 @@ func debounceCmd(query string) tea.Cmd {
 	})
 }
 
+func freezeRegistry(isPhp bool) string {
+	if isPhp {
+		return "packagist"
+	}
+	return "npm"
+}
+
 func freezeTuiCmd(name, version, note string, isPhp bool) tea.Cmd {
 	return func() tea.Msg {
-		reg := "npm"
-		if isPhp {
-			reg = "packagist"
-		}
 		err := config.Update(func(cfg *config.Config) error {
-			cfg.SetFrozen(reg, config.FreezeVersionPackage{Name: name, Version: version, Note: note})
+			cfg.SetFrozen(freezeRegistry(isPhp), config.FreezeVersionPackage{Name: name, Version: version, Note: note})
 			return nil
 		})
 		if err != nil {
 			return freezeActionMsg{action: "frozen", name: name, err: err}
 		}
-		return freezeActionMsg{action: "frozen", name: name, freezeData: loadFreezeData()}
+		return freezeActionMsg{action: "frozen", name: name, freezeData: loadFreezeData(isPhp)}
 	}
 }
 
-func unfreezeTuiCmd(name string) tea.Cmd {
+func unfreezeTuiCmd(name string, isPhp bool) tea.Cmd {
 	return func() tea.Msg {
 		err := config.Update(func(cfg *config.Config) error {
-			if !cfg.RemoveFrozen("", name) {
+			if !cfg.RemoveFrozen(freezeRegistry(isPhp), name) {
 				return fmt.Errorf("%s is not frozen", name)
 			}
 			return nil
@@ -119,7 +122,7 @@ func unfreezeTuiCmd(name string) tea.Cmd {
 		if err != nil {
 			return freezeActionMsg{action: "unfrozen", name: name, err: err}
 		}
-		return freezeActionMsg{action: "unfrozen", name: name, freezeData: loadFreezeData()}
+		return freezeActionMsg{action: "unfrozen", name: name, freezeData: loadFreezeData(isPhp)}
 	}
 }
 
@@ -173,7 +176,7 @@ type PackagesModel struct {
 
 func NewPackages(width, height int, framework registry.Framework, targetDir string) PackagesModel {
 	isPhp := framework.Ecosystem == "php"
-	freezeData := loadFreezeData()
+	freezeData := loadFreezeData(isPhp)
 	return PackagesModel{
 		width:           width,
 		height:          height,
@@ -191,7 +194,7 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 	isPhp := framework.Ecosystem == "php"
 	saved := make([]packages.Package, len(cart))
 	copy(saved, cart)
-	freezeData := loadFreezeData()
+	freezeData := loadFreezeData(isPhp)
 	return PackagesModel{
 		width:           width,
 		height:          height,
@@ -207,16 +210,16 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 	}
 }
 
-func loadFreezeData() map[string]config.FreezeVersionPackage {
+// loadFreezeData returns the frozen packages of the registry matching the
+// project: npm versions must never be pinned on a composer project and vice versa.
+func loadFreezeData(isPhp bool) map[string]config.FreezeVersionPackage {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil
 	}
 	freezeData := make(map[string]config.FreezeVersionPackage)
-	for _, pkgs := range cfg.FreezeVersionPackages {
-		for _, p := range pkgs {
-			freezeData[p.Name] = p
-		}
+	for _, p := range cfg.FreezeVersionPackages[freezeRegistry(isPhp)] {
+		freezeData[p.Name] = p
 	}
 	return freezeData
 }
@@ -553,7 +556,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				if entry, ok := m.currentFrozenEntry(); ok {
 					m.freezeStatus = "Unfreezing " + entry.Name + "..."
 					m.inFreezeView = false
-					return m, unfreezeTuiCmd(entry.Name)
+					return m, unfreezeTuiCmd(entry.Name, m.isPhp)
 				}
 				break
 			}
@@ -566,7 +569,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 			if pkg, ok := m.currentPackage(); ok {
 				if _, isFrozen := m.freezeData[pkg.Name]; isFrozen {
 					m.freezeStatus = "Unfreezing " + pkg.Name + "..."
-					return m, unfreezeTuiCmd(pkg.Name)
+					return m, unfreezeTuiCmd(pkg.Name, m.isPhp)
 				}
 				if len(pkg.Versions) == 0 {
 					m.freezeStatus = "No versions available for " + pkg.Name

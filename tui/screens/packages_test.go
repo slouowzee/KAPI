@@ -131,3 +131,33 @@ func TestFrozenView_CursorClampedToFilteredList(t *testing.T) {
 		t.Errorf("cursor %d out of range for %d filtered entries", updated.freezeViewCursor, n)
 	}
 }
+
+func TestLoadFreezeData_OnlyCurrentRegistry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := config.Update(func(cfg *config.Config) error {
+		cfg.SetFrozen("npm", config.FreezeVersionPackage{Name: "react", Version: "18.0.0"})
+		cfg.SetFrozen("packagist", config.FreezeVersionPackage{Name: "laravel/framework", Version: "11.0.0"})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		isPhp   bool
+		want    string
+		notWant string
+	}{
+		{isPhp: false, want: "react", notWant: "laravel/framework"},
+		{isPhp: true, want: "laravel/framework", notWant: "react"},
+	}
+	for _, tt := range tests {
+		data := loadFreezeData(tt.isPhp)
+		if _, ok := data[tt.want]; !ok {
+			t.Errorf("isPhp=%v: missing %s", tt.isPhp, tt.want)
+		}
+		if _, ok := data[tt.notWant]; ok {
+			t.Errorf("isPhp=%v: %s from the other registry must be ignored", tt.isPhp, tt.notWant)
+		}
+	}
+}
