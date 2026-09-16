@@ -32,7 +32,7 @@ func fakePreflightEnv(installed []string, gitValues map[string]string, token str
 
 func TestPreflight(t *testing.T) {
 	identity := map[string]string{"user.name": "Me", "user.email": "me@example.com"}
-	allTools := []string{"composer", "symfony", "npm", "npx", "pnpm", "git"}
+	allTools := []string{"php", "composer", "symfony", "node", "npm", "npx", "pnpm", "git"}
 
 	tests := []struct {
 		name         string
@@ -55,7 +55,7 @@ func TestPreflight(t *testing.T) {
 			name:         "missing composer and symfony cli",
 			fw:           registry.Framework{ID: "symfony", Ecosystem: "php"},
 			env:          fakePreflightEnv(nil, identity, "", config.TokenScopes{}, nil),
-			wantBlocking: []string{"composer is not installed", "symfony is not installed"},
+			wantBlocking: []string{"php is not installed", "composer is not installed", "symfony is not installed"},
 		},
 		{
 			name:         "missing package manager",
@@ -64,6 +64,13 @@ func TestPreflight(t *testing.T) {
 			withPackages: true,
 			env:          fakePreflightEnv([]string{"git"}, identity, "", config.TokenScopes{}, nil),
 			wantBlocking: []string{"bun is not installed", "bunx is not installed"},
+		},
+		{
+			name:         "npm without node",
+			fw:           jsfw("nextjs"),
+			pm:           packagemanager.NPM,
+			env:          fakePreflightEnv([]string{"npm", "npx"}, identity, "", config.TokenScopes{}, nil),
+			wantBlocking: []string{"node is not installed"},
 		},
 		{
 			name:         "invalid js project name",
@@ -145,7 +152,7 @@ func TestPreflight_NonEmptyDirectoryWarns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := fakePreflightEnv([]string{"composer"}, nil, "", config.TokenScopes{}, nil)
+	env := fakePreflightEnv([]string{"php", "composer"}, nil, "", config.TokenScopes{}, nil)
 
 	issues := preflight(context.Background(), env, dir, fw("laravel"), gitconfig.GitConfig{}, packagemanager.None, false)
 

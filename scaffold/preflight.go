@@ -108,6 +108,7 @@ func requiredTools(fw registry.Framework, gitCfg gitconfig.GitConfig, pm package
 	tools := map[string]struct{}{}
 	switch fw.Ecosystem {
 	case "php":
+		tools["php"] = struct{}{}
 		tools["composer"] = struct{}{}
 		if fw.ID == "symfony" {
 			tools["symfony"] = struct{}{}
@@ -115,6 +116,10 @@ func requiredTools(fw registry.Framework, gitCfg gitconfig.GitConfig, pm package
 	case "js":
 		if pm == packagemanager.None {
 			pm = packagemanager.NPM
+		}
+		// NOTE: npm, pnpm, Yarn and npx all run on Node; Bun ships its own runtime.
+		if pm != packagemanager.Bun {
+			tools["node"] = struct{}{}
 		}
 		tools[pm.ExecArgs()[0]] = struct{}{}
 		tools[pm.CreateArgs()[0]] = struct{}{}
