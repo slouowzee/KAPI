@@ -73,25 +73,39 @@ func TestCreateRepo_Created(t *testing.T) {
 func TestCreateRepo_NameTaken(t *testing.T) {
 	tests := []struct {
 		name        string
+		private     bool
 		existing    map[string]any
 		existingErr int
+		branches    []map[string]string
 		wantReuse   bool
-		wantErrText string
 	}{
 		{
-			name:      "empty repository from a previous run is reused",
-			existing:  map[string]any{"ssh_url": "git@github.com:me/repo.git", "size": 0},
+			name:      "empty repository with the same visibility is reused",
+			private:   true,
+			existing:  map[string]any{"ssh_url": "git@github.com:me/repo.git", "private": true},
+			branches:  []map[string]string{},
 			wantReuse: true,
 		},
 		{
-			name:        "repository with content is not reused",
-			existing:    map[string]any{"ssh_url": "git@github.com:me/repo.git", "size": 120},
-			wantErrText: "name already exists on this account",
+			name:     "public repository is never reused for a private request",
+			private:  true,
+			existing: map[string]any{"ssh_url": "git@github.com:me/repo.git", "private": false},
+			branches: []map[string]string{},
 		},
 		{
-			name:        "invalid name reports the API message",
+			name:     "private repository is not reused for a public request",
+			private:  false,
+			existing: map[string]any{"ssh_url": "git@github.com:me/repo.git", "private": true},
+			branches: []map[string]string{},
+		},
+		{
+			name:     "repository with a branch is not reused",
+			existing: map[string]any{"ssh_url": "git@github.com:me/repo.git", "private": false},
+			branches: []map[string]string{{"name": "main"}},
+		},
+		{
+			name:        "missing repository reports the API message",
 			existingErr: http.StatusNotFound,
-			wantErrText: "name already exists on this account",
 		},
 	}
 	for _, tt := range tests {
@@ -113,19 +127,22 @@ func TestCreateRepo_NameTaken(t *testing.T) {
 				}
 				writeJSON(w, http.StatusOK, tt.existing)
 			})
+			mux.HandleFunc("GET /repos/me/repo/branches", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, http.StatusOK, tt.branches)
+			})
 			ts := httptest.NewServer(mux)
 			defer ts.Close()
 			redirectTo(t, ts)
 
-			repo, err := CreateRepo(context.Background(), "secret", "repo", false)
+			repo, err := CreateRepo(context.Background(), "secret", "repo", tt.private)
 			if tt.wantReuse {
 				if err != nil || repo.SSHURL == "" {
 					t.Fatalf("expected the empty repo to be reused, got %+v, %v", repo, err)
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErrText) {
-				t.Errorf("err = %v, want it to contain %q", err, tt.wantErrText)
+			if err == nil || !strings.Contains(err.Error(), "name already exists on this account") {
+				t.Errorf("err = %v, want the API message", err)
 			}
 		})
 	}

@@ -25,13 +25,13 @@ var ErrNoToken = errors.New("GitHub token not configured — run: kapi config gi
 type Repo struct {
 	SSHURL   string `json:"ssh_url"`
 	CloneURL string `json:"clone_url"`
-	// Size is in kilobytes; 0 means nothing was ever pushed.
-	Size int `json:"size"`
+	Private  bool   `json:"private"`
 }
 
 // CreateRepo creates a repository for the authenticated user. When the name is
-// already taken by an empty repository of that user (typically left behind by
-// a previous kapi run that failed later on), that repository is reused.
+// already taken by an empty repository of that user with the same visibility
+// (typically left behind by a previous kapi run that failed later on), that
+// repository is reused.
 func CreateRepo(ctx context.Context, token, name string, private bool) (Repo, error) {
 	if token == "" {
 		return Repo{}, ErrNoToken
@@ -50,7 +50,7 @@ func CreateRepo(ctx context.Context, token, name string, private bool) (Repo, er
 
 	switch {
 	case resp.StatusCode == http.StatusUnprocessableEntity:
-		if repo, ok := reusableRepo(ctx, client, token, name); ok {
+		if repo, ok := reusableRepo(ctx, client, token, name, private); ok {
 			return repo, nil
 		}
 		return Repo{}, fmt.Errorf("could not create GitHub repo %q: %s", name, apiMessage(data, "the name is already used"))
@@ -68,8 +68,10 @@ func CreateRepo(ctx context.Context, token, name string, private bool) (Repo, er
 	return repo, nil
 }
 
-// reusableRepo returns the user's repository with that name if it is empty.
-func reusableRepo(ctx context.Context, client *http.Client, token, name string) (Repo, bool) {
+// reusableRepo returns the user's repository with that name if it has no
+// branch and the requested visibility. The size field is not used: GitHub
+// computes it asynchronously and reports 0 right after a push.
+func reusableRepo(ctx context.Context, client *http.Client, token, name string, private bool) (Repo, bool) {
 	resp, data, err := do(ctx, client, token, http.MethodGet, apiURL+"/user", nil)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return Repo{}, false
@@ -81,12 +83,27 @@ func reusableRepo(ctx context.Context, client *http.Client, token, name string) 
 		return Repo{}, false
 	}
 
-	resp, data, err = do(ctx, client, token, http.MethodGet, apiURL+"/repos/"+user.Login+"/"+name, nil)
+	repoURL := apiURL + "/repos/" + user.Login + "/" + name
+	resp, data, err = do(ctx, client, token, http.MethodGet, repoURL, nil)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return Repo{}, false
 	}
 	var repo Repo
-	if json.Unmarshal(data, &repo) != nil || repo.SSHURL == "" || repo.Size != 0 {
+	if json.Unmarshal(data, &repo) != nil || repo.SSHURL == "" {
+		return Repo{}, false
+	}
+	// NOTE: reusing a public repository when a private one was requested
+	// would publish the project.
+	if repo.Private != private {
+		return Repo{}, false
+	}
+
+	resp, data, err = do(ctx, client, token, http.MethodGet, repoURL+"/branches?per_page=1", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return Repo{}, false
+	}
+	var branches []json.RawMessage
+	if json.Unmarshal(data, &branches) != nil || len(branches) > 0 {
 		return Repo{}, false
 	}
 	return repo, true
