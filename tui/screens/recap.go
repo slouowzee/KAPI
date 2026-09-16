@@ -1,9 +1,11 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/packagemanager"
@@ -37,7 +39,8 @@ type RecapModel struct {
 
 	cursor int
 
-	nameErr string
+	checking bool
+	issues   []scaffold.Issue
 
 	done           bool
 	backSection    RecapSection
@@ -64,9 +67,18 @@ func NewRecap(width, height int, s RecapSummary) RecapModel {
 		gitCfg:    s.GitCfg,
 		pm:        s.PM,
 		cursor:    int(RECAP_SECTION_CONFIRM),
-		nameErr:   scaffold.ProjectNameError(s.Framework, s.Dir),
+		checking:  true,
 	}
 }
+
+type preflightDoneMsg struct {
+	issues []scaffold.Issue
+}
+
+// runPreflight is a variable so tests do not depend on the machine's tools.
+var runPreflight = scaffold.Preflight
+
+const preflightTimeout = 15 * time.Second
 
 func (m *RecapModel) SetSize(width, height int) {
 	m.width = width
@@ -85,7 +97,19 @@ func (m RecapModel) BackSection() RecapSection { return m.backSection }
 
 func (m *RecapModel) ConsumeBack() { m.backPressed = false }
 
-func (m RecapModel) Init() tea.Cmd { return nil }
+func (m RecapModel) Init() tea.Cmd {
+	dir, fw, gitCfg, pm, withPackages := m.dir, m.framework, m.gitCfg, m.pm, len(m.pkgs) > 0
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+		defer cancel()
+		return preflightDoneMsg{issues: runPreflight(ctx, dir, fw, gitCfg, pm, withPackages)}
+	}
+}
+
+// CanScaffold reports whether the checks are done and nothing blocks.
+func (m RecapModel) CanScaffold() bool {
+	return !m.checking && !scaffold.HasBlocking(m.issues)
+}
 
 func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -93,6 +117,10 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case preflightDoneMsg:
+		m.checking = false
+		m.issues = msg.issues
 
 	case tea.KeyMsg:
 		if m.abandonPending {
@@ -129,7 +157,7 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 			sec := RecapSection(m.cursor)
 			switch sec {
 			case RECAP_SECTION_CONFIRM:
-				if m.nameErr == "" {
+				if m.CanScaffold() {
 					m.done = true
 				}
 			case RECAP_SECTION_ABANDON:
@@ -174,10 +202,7 @@ func (m RecapModel) View() string {
 
 		if row.section == RECAP_SECTION_CONFIRM {
 			sb.WriteString("\n")
-			if m.nameErr != "" {
-				sb.WriteString(styles.ErrorStyle.Render("  ✗ "+m.nameErr) + "\n")
-				sb.WriteString(styles.DimStyle.Render("    Edit the directory to continue.") + "\n\n")
-			}
+			sb.WriteString(m.renderIssues())
 			if isCursor {
 				fmt.Fprintf(&sb, "%s%s\n",
 					styles.CursorStyle.Render("  ❯❯"),
@@ -228,6 +253,27 @@ func (m RecapModel) View() string {
 		sb.WriteString(styles.MutedStyle.Render("  [↑↓] navigate   [↵] select / confirm   [esc] back   [q] quit") + "\n")
 	}
 	return sb.String()
+}
+
+func (m RecapModel) renderIssues() string {
+	if m.checking {
+		return styles.DimStyle.Render("  Checking prerequisites…") + "\n\n"
+	}
+	if len(m.issues) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, issue := range m.issues {
+		if issue.Blocking {
+			sb.WriteString(styles.ErrorStyle.Render("  ✗ "+issue.Message) + "\n")
+		} else {
+			sb.WriteString(styles.SubtitleStyle.Render("  ⚠ "+issue.Message) + "\n")
+		}
+	}
+	if scaffold.HasBlocking(m.issues) {
+		sb.WriteString(styles.DimStyle.Render("    Fix the issues above to continue.") + "\n")
+	}
+	return sb.String() + "\n"
 }
 
 type recapRow struct {

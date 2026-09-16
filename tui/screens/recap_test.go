@@ -1,11 +1,14 @@
 package screens
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/scaffold"
 )
 
 func gitValue(cfg GitConfig) string {
@@ -164,25 +167,51 @@ func TestGitValue_UniversalGitignore(t *testing.T) {
 	}
 }
 
-func TestRecap_InvalidProjectNameBlocksConfirm(t *testing.T) {
+func TestRecap_PreflightGatesConfirm(t *testing.T) {
 	tests := []struct {
 		name     string
-		dir      string
-		eco      string
+		issues   []scaffold.Issue
+		checked  bool
 		wantDone bool
 	}{
-		{name: "valid js name", dir: "/tmp/my-app", eco: "js", wantDone: true},
-		{name: "invalid js name", dir: "/tmp/My App", eco: "js", wantDone: false},
-		{name: "php accepts uppercase", dir: "/tmp/MyApp", eco: "php", wantDone: true},
+		{name: "still checking", checked: false, wantDone: false},
+		{name: "no issues", checked: true, wantDone: true},
+		{name: "warnings only", checked: true, issues: []scaffold.Issue{{Message: "dir not empty"}}, wantDone: true},
+		{name: "blocking issue", checked: true, issues: []scaffold.Issue{{Blocking: true, Message: "composer missing"}}, wantDone: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewRecap(80, 24, RecapSummary{Dir: tt.dir, Framework: registry.Framework{ID: "x", Ecosystem: tt.eco}})
+			m := NewRecap(80, 24, RecapSummary{Dir: "/tmp/my-app", Framework: registry.Framework{ID: "laravel", Ecosystem: "php"}})
+			if tt.checked {
+				m, _ = m.Update(preflightDoneMsg{issues: tt.issues})
+			}
 			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			if updated.Done() != tt.wantDone {
 				t.Errorf("Done() = %v, want %v", updated.Done(), tt.wantDone)
 			}
+			for _, issue := range tt.issues {
+				if !strings.Contains(updated.View(), issue.Message) {
+					t.Errorf("issue %q is not displayed", issue.Message)
+				}
+			}
 		})
+	}
+}
+
+func TestRecap_InitRunsPreflight(t *testing.T) {
+	orig := runPreflight
+	t.Cleanup(func() { runPreflight = orig })
+	var gotDir string
+	runPreflight = func(_ context.Context, dir string, _ registry.Framework, _ GitConfig, _ packagemanager.PM, _ bool) []scaffold.Issue {
+		gotDir = dir
+		return []scaffold.Issue{{Blocking: true, Message: "boom"}}
+	}
+
+	m := NewRecap(80, 24, RecapSummary{Dir: "/tmp/my-app"})
+	m, _ = m.Update(m.Init()())
+
+	if gotDir != "/tmp/my-app" || m.CanScaffold() {
+		t.Errorf("preflight not applied: dir=%q canScaffold=%v", gotDir, m.CanScaffold())
 	}
 }
 
