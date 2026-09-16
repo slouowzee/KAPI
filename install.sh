@@ -132,7 +132,16 @@ add_to_file() {
 SHELL_NAME=$(basename "${SHELL:-sh}")
 
 printf "\nSet up shell integration for automatic cd after scaffold? [Y/n] "
-read -r REPLY
+# When piped (curl | bash), stdin is the script itself: read the answer from
+# the terminal instead, and fall back to the default without one.
+REPLY=""
+if [ -t 0 ]; then
+  read -r REPLY
+elif { : < /dev/tty; } 2>/dev/null; then
+  read -r REPLY < /dev/tty
+else
+  echo ""
+fi
 
 case "$REPLY" in
   [Nn]*)
