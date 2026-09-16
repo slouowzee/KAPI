@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"os"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/ecosystem"
@@ -59,6 +56,10 @@ type App struct {
 	// package manager screen whenever no choice has been made yet.
 	defaultPM packagemanager.PM
 
+	// configErr is reported once the TUI has exited: anything printed before
+	// is hidden by the alternate screen.
+	configErr error
+
 	cdDir      string
 	browseMode bool
 	editMode   bool
@@ -66,15 +67,13 @@ type App struct {
 
 func New() App {
 	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
-	}
 	defaultPM := packagemanager.Parse(cfg.PackageManager)
 	return App{
 		screen:     ScreenWelcome,
 		welcome:    screens.NewWelcome(0, 0),
 		selectedPM: defaultPM,
 		defaultPM:  defaultPM,
+		configErr:  err,
 	}
 }
 
@@ -548,6 +547,8 @@ func (a App) goToRecap() (App, tea.Cmd) {
 }
 
 func (a App) FinalDir() string { return a.cdDir }
+
+func (a App) ConfigError() error { return a.configErr }
 
 func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 	switch eco {

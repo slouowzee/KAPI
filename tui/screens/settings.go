@@ -2,7 +2,6 @@ package screens
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -58,15 +57,18 @@ type SettingsModel struct {
 
 func NewSettings(width, height int) SettingsModel {
 	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
-	}
-	return SettingsModel{
+	m := SettingsModel{
 		width:     width,
 		height:    height,
 		step:      SettingsStepMenu,
 		currentPM: packagemanager.Parse(cfg.PackageManager),
 	}
+	// NOTE: writing to stderr would corrupt the alternate screen.
+	if err != nil {
+		m.lastErr = err
+		m.lastMsg = "Could not load config: " + err.Error()
+	}
+	return m
 }
 
 func (m *SettingsModel) SetSize(width, height int) {

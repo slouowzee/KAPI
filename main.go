@@ -47,6 +47,9 @@ func main() {
 	}
 
 	if app, ok := model.(tui.App); ok {
+		if err := app.ConfigError(); err != nil {
+			fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
+		}
 		if dir := app.FinalDir(); dir != "" {
 			writeCdTarget(dir)
 		}
