@@ -399,3 +399,24 @@ func TestGitModel_NoRepo_DisablesRemote(t *testing.T) {
 		t.Errorf("cursor = %d, want gitFieldCollab (%d) when remote is unavailable", m.cursor, gitFieldCollab)
 	}
 }
+
+func TestGit_InitialCommitOption(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  GitConfig
+		want bool
+	}{
+		{name: "fresh screen defaults to yes", cfg: GitConfig{}, want: true},
+		{name: "edit keeps yes", cfg: GitConfig{InitLocal: true, InitialCommit: true, CI: ciChoiceNone}, want: true},
+		{name: "edit keeps no", cfg: GitConfig{InitLocal: true, InitialCommit: false, CI: ciChoiceNone}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Git(80, 24, "/home/user/myproject", tt.cfg)
+			m.initOpt = gitInitYes
+			if got := m.Config().InitialCommit; got != tt.want {
+				t.Errorf("InitialCommit = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

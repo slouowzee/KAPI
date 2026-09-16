@@ -148,6 +148,7 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 			height:    height,
 			targetDir: targetDir,
 			detecting: true,
+			commitOpt: gitCommitYes,
 		}
 	}
 
@@ -167,10 +168,6 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 		m.ignoreOpt = gitIgnoreYes
 	}
 	if cfg.InitialCommit {
-		m.commitOpt = gitCommitYes
-	} else {
-		// Par défaut à Yes si rien n'est précisé, ou en fonction des préférences passées
-		// Mais comme Config() est vide lors du premier passage, on initialise à gitCommitYes lors du reset local
 		m.commitOpt = gitCommitYes
 	}
 	switch {
