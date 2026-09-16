@@ -256,26 +256,15 @@ func cleanupPartial(targetDir string, preDirEntries []string) error {
 		pre[name] = struct{}{}
 	}
 
-	alwaysRemove := map[string]struct{}{
-		"node_modules":      {},
-		"vendor":            {},
-		"composer.lock":     {},
-		"package-lock.json": {},
-		"yarn.lock":         {},
-		"pnpm-lock.yaml":    {},
-		"bun.lock":          {},
-		".git":              {},
-	}
-
 	entries, err := os.ReadDir(targetDir)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		name := e.Name()
-		_, wasAlreadyThere := pre[name]
-		_, alwaysDel := alwaysRemove[name]
-		if !wasAlreadyThere || alwaysDel {
+		// NOTE: entries that existed before kapi ran (.git, vendor, lockfiles…)
+		// belong to the user and must never be deleted by a rollback.
+		if _, wasAlreadyThere := pre[name]; !wasAlreadyThere {
 			if removeErr := os.RemoveAll(filepath.Join(targetDir, name)); removeErr != nil && err == nil {
 				err = removeErr
 			}

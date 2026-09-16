@@ -34,7 +34,43 @@ func TestCleanupPartial_RemovesNewEntries(t *testing.T) {
 	}
 }
 
-func TestCleanupPartial_AlwaysRemovesNodeModules(t *testing.T) {
+func TestCleanupPartial_KeepsPreexistingEntries(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+		isDir bool
+	}{
+		{name: "git repository", entry: ".git", isDir: true},
+		{name: "node modules", entry: "node_modules", isDir: true},
+		{name: "vendor", entry: "vendor", isDir: true},
+		{name: "composer lockfile", entry: "composer.lock"},
+		{name: "npm lockfile", entry: "package-lock.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tt.entry)
+			if tt.isDir {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := cleanupPartial(dir, []string{tt.entry}); err != nil {
+				t.Fatalf("cleanupPartial returned error: %v", err)
+			}
+
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("%s existed before scaffolding and was removed", tt.entry)
+			}
+		})
+	}
+}
+
+func TestCleanupPartial_RemovesNewDependencyDirs(t *testing.T) {
 	dir := t.TempDir()
 
 	nm := filepath.Join(dir, "node_modules")
@@ -42,31 +78,12 @@ func TestCleanupPartial_AlwaysRemovesNodeModules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pre := []string{"node_modules"}
-	if err := cleanupPartial(dir, pre); err != nil {
+	if err := cleanupPartial(dir, []string{"README.md"}); err != nil {
 		t.Fatalf("cleanupPartial returned error: %v", err)
 	}
 
 	if _, err := os.Stat(nm); err == nil {
-		t.Error("node_modules still exists, expected it to be removed")
-	}
-}
-
-func TestCleanupPartial_AlwaysRemovesDotGit(t *testing.T) {
-	dir := t.TempDir()
-
-	dotGit := filepath.Join(dir, ".git")
-	if err := os.Mkdir(dotGit, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	pre := []string{".git"}
-	if err := cleanupPartial(dir, pre); err != nil {
-		t.Fatalf("cleanupPartial returned error: %v", err)
-	}
-
-	if _, err := os.Stat(dotGit); err == nil {
-		t.Error(".git still exists, expected it to be removed")
+		t.Error("node_modules was created by the scaffold and should have been removed")
 	}
 }
 
