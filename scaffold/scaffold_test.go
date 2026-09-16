@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -737,8 +738,69 @@ func TestStreamCmd_VeryLongLineDoesNotBlock(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("streaming blocked on a very long output line")
 	}
-	if len(lines) == 0 || !strings.Contains(lines[len(lines)-1], "output line too long") {
-		t.Errorf("expected a notice about the long line, got %v", lines)
+	if !slices.Contains(lines, lineTooLongNotice) || lines[len(lines)-1] != "done" {
+		t.Errorf("expected a notice per long line and the following output, got %v", lines)
+	}
+}
+
+func TestStreamCmd_OrphanHoldingOutputDoesNotBlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell")
+	}
+	orig := abortGracePeriod
+	abortGracePeriod = 300 * time.Millisecond
+	t.Cleanup(func() { abortGracePeriod = orig })
+
+	done := make(chan error, 1)
+	var lines []string
+	go func() {
+		// The background sleep inherits stdout and outlives the shell.
+		done <- streamCmd("", "sh", "-c", "sleep 3 & echo hello")(context.Background(), func(l string) {
+			lines = append(lines, l)
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("a successful command must not fail because of an orphan: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("streaming blocked on output kept open by an orphaned process")
+	}
+	if !slices.Equal(lines, []string{"hello"}) {
+		t.Errorf("lines = %v, want [hello]", lines)
+	}
+}
+
+func TestLineWriter(t *testing.T) {
+	tests := []struct {
+		name   string
+		writes []string
+		want   []string
+	}{
+		{name: "split across writes", writes: []string{"hel", "lo\nwor", "ld\n"}, want: []string{"hello", "world"}},
+		{name: "unterminated last line is flushed", writes: []string{"a\nb"}, want: []string{"a", "b"}},
+		{name: "long line is replaced by a notice", writes: []string{"0123456789ABC\nok\n"}, want: []string{lineTooLongNotice, "ok"}},
+		{name: "long line across writes", writes: []string{"0123456789", "ABCDEF", "GH\nok"}, want: []string{lineTooLongNotice, "ok"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			w := &lineWriter{onLine: func(l string) { got = append(got, l) }, maxLine: 10}
+			for _, s := range tt.writes {
+				if n, err := w.Write([]byte(s)); err != nil || n != len(s) {
+					t.Fatalf("Write(%q) = %d, %v", s, n, err)
+				}
+			}
+			w.flush()
+			if _, err := w.Write([]byte("late\n")); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("lines = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

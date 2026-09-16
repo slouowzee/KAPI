@@ -1,15 +1,13 @@
 package scaffold
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/slouowzee/kapi/internal/config"
@@ -503,9 +501,10 @@ type streamFunc = func(ctx context.Context, onLine func(string)) error
 // very long lines without newlines).
 const maxOutputLine = 1024 * 1024
 
-// abortGracePeriod is how long an aborted command gets to exit after being
-// signalled before its pipes are forcibly closed.
-const abortGracePeriod = 5 * time.Second
+// abortGracePeriod is how long a command gets to exit after being signalled,
+// and how long its output is still read once it has exited, before its pipes
+// are forcibly closed. It is a variable so tests can shorten it.
+var abortGracePeriod = 5 * time.Second
 
 func streamCmd(dir string, name string, args ...string) streamFunc {
 	return func(ctx context.Context, onLine func(string)) error {
@@ -531,50 +530,24 @@ func streamGitCmd(targetDir string, args ...string) streamFunc {
 }
 
 func runStreamed(c *exec.Cmd, onLine func(string)) error {
-	stdout, err := c.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := c.StderrPipe()
-	if err != nil {
-		return err
+	w := &lineWriter{onLine: onLine, maxLine: maxOutputLine}
+	c.Stdout = w
+	c.Stderr = w
+	if c.WaitDelay == 0 {
+		c.WaitDelay = abortGracePeriod
 	}
 	if err := c.Start(); err != nil {
 		return err
 	}
 
-	lines := make(chan string)
-	var wg sync.WaitGroup
-
-	scanPipe := func(r io.Reader) {
-		defer wg.Done()
-		s := bufio.NewScanner(r)
-		s.Buffer(make([]byte, 0, 64*1024), maxOutputLine)
-		for s.Scan() {
-			lines <- s.Text()
-		}
-		if s.Err() != nil {
-			lines <- "[kapi: output line too long, remaining output hidden]"
-		}
-		// NOTE: the pipe must be drained, otherwise a command writing more
-		// output blocks forever and Wait never returns.
-		_, _ = io.Copy(io.Discard, r)
+	err := c.Wait()
+	w.flush()
+	// NOTE: ErrWaitDelay means the command succeeded but a background process
+	// it started kept the output open; the step itself is done.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil
 	}
-
-	wg.Add(2)
-	go scanPipe(stdout)
-	go scanPipe(stderr)
-
-	go func() {
-		wg.Wait()
-		close(lines)
-	}()
-
-	for line := range lines {
-		onLine(line)
-	}
-
-	return c.Wait()
+	return err
 }
 
 func initialCommitStep(targetDir string) Step {
