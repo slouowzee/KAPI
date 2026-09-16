@@ -153,23 +153,6 @@ func TestCIInstall(t *testing.T) {
 	}
 }
 
-func TestRunScript(t *testing.T) {
-	cases := []struct {
-		pm   PM
-		want string
-	}{
-		{NPM, "npm run"},
-		{PNPM, "pnpm run"},
-		{Yarn, "yarn run"},
-		{Bun, "bun run"},
-	}
-	for _, c := range cases {
-		if got := c.pm.RunScript(); got != c.want {
-			t.Errorf("PM(%v).RunScript() = %q, want %q", c.pm, got, c.want)
-		}
-	}
-}
-
 func TestCacheKey(t *testing.T) {
 	cases := []struct {
 		pm   PM

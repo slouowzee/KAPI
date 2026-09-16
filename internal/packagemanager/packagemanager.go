@@ -52,19 +52,6 @@ func Parse(s string) PM {
 	}
 }
 
-func (pm PM) Exec() string {
-	switch pm {
-	case PNPM:
-		return "pnpm"
-	case Yarn:
-		return "yarn"
-	case Bun:
-		return "bunx"
-	default:
-		return "npx"
-	}
-}
-
 // yarnSupportsDlx is a variable so tests can simulate either Yarn flavour.
 var yarnSupportsDlx = sync.OnceValue(detectYarnDlx)
 
@@ -138,15 +125,6 @@ func (pm PM) CIInstall() string {
 		return "bun install --frozen-lockfile"
 	default:
 		return "npm ci"
-	}
-}
-
-func (pm PM) RunScript() string {
-	switch pm {
-	case Bun:
-		return "bun run"
-	default:
-		return pm.String() + " run"
 	}
 }
 
