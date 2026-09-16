@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -26,19 +27,7 @@ func HandleFreeze(args []string) {
 		return
 	}
 
-	var name, version string
-	lastIdx := strings.LastIndex(arg, "/")
-	if lastIdx != -1 {
-		maybeVer := arg[lastIdx+1:]
-		if len(maybeVer) > 0 && (maybeVer[0] >= '0' && maybeVer[0] <= '9' || maybeVer[0] == 'v') {
-			name = arg[:lastIdx]
-			version = maybeVer
-		} else {
-			name = arg
-		}
-	} else {
-		name = arg
-	}
+	name, version := parseFreezeArg(arg)
 
 	fmt.Printf("Searching for package '%s'...\n", name)
 
@@ -93,10 +82,27 @@ func HandleFreeze(args []string) {
 	fmt.Printf("Package %s version %s successfully cached in config.json\n", pkg.Name, version)
 }
 
+// versionSuffixRe matches what can follow the last "/" or "@" as a version:
+// 1, 1.2.3, v2.0.0-beta.1… but not package segments such as var-dumper or volt.
+var versionSuffixRe = regexp.MustCompile(`^v?\d+(\.\d+)*([-+][0-9A-Za-z.-]+)?$`)
+
+// parseFreezeArg splits "<package>[@<version>]" or "<package>[/<version>]"
+// into a package name and an optional version.
+func parseFreezeArg(arg string) (name, version string) {
+	if i := strings.LastIndex(arg, "@"); i > 0 {
+		return arg[:i], arg[i+1:]
+	}
+	if i := strings.LastIndex(arg, "/"); i != -1 && versionSuffixRe.MatchString(arg[i+1:]) {
+		return arg[:i], arg[i+1:]
+	}
+	return arg, ""
+}
+
 func printFreezeHelp() {
 	PrintLogoAndTitle("Freeze")
 	fmt.Println("  " + styles.MutedStyle.Render("Usage:"))
-	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <package>[/<version>]") + "  Freezes the version of a package to prevent it from being updated.")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <package>[@<version>]") + "  Freezes the version of a package to prevent it from being updated.")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <package>[/<version>]") + "  Same as above, kept for compatibility.")
 	fmt.Println()
 }
 
