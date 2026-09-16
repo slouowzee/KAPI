@@ -439,6 +439,7 @@ func (m ExecModel) View() string {
 			sb.WriteString("\n")
 			sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm") + "\n")
 		} else {
+			sb.WriteString(styles.DimStyle.Render("  Tip: set up `kapi shell-init` to cd into new projects automatically.") + "\n")
 			sb.WriteString(styles.MutedStyle.Render("  [↵] quit") + "\n")
 		}
 	case m.done:

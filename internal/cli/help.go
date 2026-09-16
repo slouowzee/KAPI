@@ -17,6 +17,7 @@ func PrintHelp() {
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <k> <v>") + "    Set a configuration value")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze [key]") + "      Freeze a package version")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi unfreeze [key]") + "    Unfreeze a package version")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi shell-init [sh]") + "   Print the shell integration (auto cd)")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi version") + "           Show the current version")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi help") + "              Show this help message")
 	fmt.Println()

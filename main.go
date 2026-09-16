@@ -23,6 +23,9 @@ func main() {
 		case "unfreeze":
 			cli.HandleUnfreeze(os.Args[2:])
 			return
+		case "shell-init":
+			cli.HandleShellInit(os.Args[2:])
+			return
 		case "version", "-version", "--version", "-v":
 			fmt.Println(updater.CurrentVersion)
 			return
