@@ -480,6 +480,14 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 	}
 }
 
+// signingGitFormat maps kapi's signing format to git's gpg.format value.
+func signingGitFormat(format string) string {
+	if format == "ssh" {
+		return "ssh"
+	}
+	return "openpgp"
+}
+
 func execGitSigningCmd(dir, format, scope, key string) tea.Cmd {
 	return func() tea.Msg {
 		scopes := []string{}
@@ -503,12 +511,12 @@ func execGitSigningCmd(dir, format, scope, key string) tea.Cmd {
 			if err := cmd2.Run(); err != nil {
 				return gitcfgSigningDoneMsg{err: fmt.Errorf("could not set user.signingkey (%s): %w", s, err)}
 			}
-			if format == "ssh" {
-				cmd3 := exec.Command("git", "config", s, "gpg.format", "ssh")
-				cmd3.Dir = dir
-				if err := cmd3.Run(); err != nil {
-					return gitcfgSigningDoneMsg{err: fmt.Errorf("could not set gpg.format (%s): %w", s, err)}
-				}
+			// NOTE: gpg.format must always be written: a previous SSH setup
+			// leaves "ssh" behind, which breaks GPG signing.
+			cmd3 := exec.Command("git", "config", s, "gpg.format", signingGitFormat(format))
+			cmd3.Dir = dir
+			if err := cmd3.Run(); err != nil {
+				return gitcfgSigningDoneMsg{err: fmt.Errorf("could not set gpg.format (%s): %w", s, err)}
 			}
 		}
 
