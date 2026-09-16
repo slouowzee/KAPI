@@ -367,3 +367,17 @@ func TestIsInputMode(t *testing.T) {
 		t.Error("IsInputMode should be true when urlEditing")
 	}
 }
+
+func TestGitModelConfig_DetectedRemote_IsExisting(t *testing.T) {
+	m := Git(80, 24, "/home/user/myproject", GitConfig{})
+	m, _ = m.Update(gitDetectionMsg{hasGit: true, remoteURL: "git@github.com:me/existing.git"})
+
+	cfg := m.Config()
+
+	if !cfg.HasExistingRemote {
+		t.Error("HasExistingRemote should be true when origin was detected")
+	}
+	if cfg.RemoteURL != "git@github.com:me/existing.git" {
+		t.Errorf("RemoteURL = %q, want the detected origin", cfg.RemoteURL)
+	}
+}

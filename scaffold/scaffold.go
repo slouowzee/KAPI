@@ -73,6 +73,9 @@ func Plan(
 }
 
 func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
+	if gitCfg.HasExistingRemote {
+		return nil
+	}
 	switch gitCfg.RemoteHost {
 	case "github":
 		name := gitCfg.RepoName

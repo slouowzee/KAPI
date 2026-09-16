@@ -229,6 +229,7 @@ func (m GitModel) Config() GitConfig {
 	if m.hasGit && m.detectedURL != "" {
 		cfg.RemoteURL = m.detectedURL
 		cfg.RemoteHost = inferRemoteHost(m.detectedURL)
+		cfg.HasExistingRemote = true
 	} else {
 		switch m.remoteOpt {
 		case gitRemoteGithubPrivate:

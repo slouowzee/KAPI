@@ -361,3 +361,21 @@ func TestGitlabCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
 		t.Errorf("pnpm gitlab CI should contain 'pnpm run --if-present test', got:\n%s", out)
 	}
 }
+
+func TestRemoteSteps_ExistingRemote_ReturnsNil(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  screens.GitConfig
+	}{
+		{name: "github origin", cfg: screens.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "github", RemoteURL: "git@github.com:me/app.git"}},
+		{name: "gitlab origin", cfg: screens.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "gitlab", RemoteURL: "git@gitlab.com:me/app.git"}},
+		{name: "custom origin", cfg: screens.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "custom", RemoteURL: "git@mygit.internal:me/app.git"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if steps := remoteSteps("/tmp/proj", tt.cfg); steps != nil {
+				t.Errorf("expected no remote steps for an existing origin, got %d", len(steps))
+			}
+		})
+	}
+}
