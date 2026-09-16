@@ -330,3 +330,28 @@ func packageEqual(a, b Package) bool {
 		a.Weekly == b.Weekly && a.GithubRepo == b.GithubRepo && a.Stars == b.Stars &&
 		a.PinnedVersion == b.PinnedVersion && slices.Equal(a.Versions, b.Versions)
 }
+
+func TestDefaultsByFramework_NoDuplicates(t *testing.T) {
+	for fw, names := range DefaultsByFramework {
+		seen := make(map[string]bool, len(names))
+		for _, name := range names {
+			if seen[name] {
+				t.Errorf("%s: %q is listed twice", fw, name)
+			}
+			seen[name] = true
+		}
+	}
+}
+
+func TestDefaultsByFramework_NoKnownDeprecatedPackages(t *testing.T) {
+	// Packages that are deprecated, abandoned or were never published under
+	// these names; keep this list in sync when refreshing defaults.json.
+	deprecated := []string{"shadcn-ui", "sentry", "recoil", "lucia", "react-beautiful-dnd", "fzaninotto/faker", "melt-ui", "visx"}
+	for fw, names := range DefaultsByFramework {
+		for _, bad := range deprecated {
+			if slices.Contains(names, bad) {
+				t.Errorf("%s suggests deprecated package %q", fw, bad)
+			}
+		}
+	}
+}
