@@ -14,7 +14,9 @@ type GitConfig struct {
 	HasExistingRemote bool
 
 	RemotePrivate bool
-	RepoName      string
-	Collab        bool
-	CI            string
+	// RemoteHTTPS selects the HTTPS clone URL instead of SSH for a new GitHub repo.
+	RemoteHTTPS bool
+	RepoName    string
+	Collab      bool
+	CI          string
 }

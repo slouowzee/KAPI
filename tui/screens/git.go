@@ -20,9 +20,15 @@ const (
 	gitFieldCommit   = 2
 	gitFieldRemote   = 3
 	gitFieldRepoName = 4
-	gitFieldURL      = 5
-	gitFieldCollab   = 6
-	gitFieldCI       = 7
+	gitFieldProtocol = 5
+	gitFieldURL      = 6
+	gitFieldCollab   = 7
+	gitFieldCI       = 8
+)
+
+const (
+	gitProtocolSSH   = 0
+	gitProtocolHTTPS = 1
 )
 
 const (
@@ -123,12 +129,13 @@ type GitModel struct {
 
 	cursor int
 
-	initOpt   int
-	ignoreOpt int
-	commitOpt int
-	remoteOpt int
-	collabOpt int
-	ciOpt     int
+	initOpt     int
+	ignoreOpt   int
+	commitOpt   int
+	remoteOpt   int
+	collabOpt   int
+	ciOpt       int
+	protocolOpt int
 
 	repoNameInput    string
 	repoNameInputPos int
@@ -174,6 +181,16 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 	case cfg.HasExistingGit && cfg.RemoteURL != "":
 		m.remoteOpt = gitRemoteExisting
 		m.urlInput = cfg.RemoteURL
+	case cfg.RemoteHost == "github" && cfg.RemoteHTTPS && cfg.RemotePrivate:
+		m.remoteOpt = gitRemoteGithubPrivate
+		m.protocolOpt = gitProtocolHTTPS
+		m.repoNameInput = cfg.RepoName
+		m.repoNameInputPos = len([]rune(m.repoNameInput))
+	case cfg.RemoteHost == "github" && cfg.RemoteHTTPS:
+		m.remoteOpt = gitRemoteGithubPublic
+		m.protocolOpt = gitProtocolHTTPS
+		m.repoNameInput = cfg.RepoName
+		m.repoNameInputPos = len([]rune(m.repoNameInput))
 	case cfg.RemoteHost == "github" && cfg.RemotePrivate:
 		m.remoteOpt = gitRemoteGithubPrivate
 		m.repoNameInput = cfg.RepoName
@@ -235,10 +252,12 @@ func (m GitModel) Config() GitConfig {
 		case gitRemoteGithubPrivate:
 			cfg.RemoteHost = "github"
 			cfg.RemotePrivate = true
+			cfg.RemoteHTTPS = m.protocolOpt == gitProtocolHTTPS
 			cfg.RepoName = strings.TrimSpace(m.repoNameInput)
 		case gitRemoteGithubPublic:
 			cfg.RemoteHost = "github"
 			cfg.RemotePrivate = false
+			cfg.RemoteHTTPS = m.protocolOpt == gitProtocolHTTPS
 			cfg.RepoName = strings.TrimSpace(m.repoNameInput)
 		case gitRemoteExisting:
 			cfg.RemoteURL = strings.TrimSpace(m.urlInput)
@@ -329,11 +348,11 @@ func (m *GitModel) moveCursor(delta int) {
 			next += delta
 			continue
 		}
-		if (next == gitFieldRemote || next == gitFieldRepoName || next == gitFieldURL) && !m.hasRepo() {
+		if (next == gitFieldRemote || next == gitFieldRepoName || next == gitFieldProtocol || next == gitFieldURL) && !m.hasRepo() {
 			next += delta
 			continue
 		}
-		if next == gitFieldRepoName && (m.remoteOpt != gitRemoteGithubPrivate && m.remoteOpt != gitRemoteGithubPublic) {
+		if (next == gitFieldRepoName || next == gitFieldProtocol) && (m.remoteOpt != gitRemoteGithubPrivate && m.remoteOpt != gitRemoteGithubPublic) {
 			next += delta
 			continue
 		}
@@ -371,6 +390,8 @@ func (m *GitModel) cycleOption(delta int) {
 			m.repoNameInput = filepath.Base(m.targetDir)
 			m.repoNameInputPos = len([]rune(m.repoNameInput))
 		}
+	case gitFieldProtocol:
+		m.protocolOpt = clamp(m.protocolOpt+delta, gitProtocolSSH, gitProtocolHTTPS)
 	case gitFieldCollab:
 		m.collabOpt = clamp(m.collabOpt+delta, gitCollabNo, gitCollabYes)
 	case gitFieldCI:
@@ -516,6 +537,7 @@ func (m GitModel) View() string {
 		sb.WriteString(m.renderRow(gitFieldRemote, "Remote", opts, m.remoteOpt))
 		if m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic {
 			sb.WriteString(m.renderRepoNameRow())
+			sb.WriteString(m.renderRow(gitFieldProtocol, "Protocol", []string{"SSH", "HTTPS"}, m.protocolOpt))
 		}
 		if m.remoteOpt == gitRemoteExisting {
 			sb.WriteString(m.renderURLRow())

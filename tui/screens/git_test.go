@@ -420,3 +420,53 @@ func TestGit_InitialCommitOption(t *testing.T) {
 		})
 	}
 }
+
+func TestGitModel_Protocol(t *testing.T) {
+	tests := []struct {
+		name      string
+		remoteOpt int
+		protocol  int
+		wantHTTPS bool
+	}{
+		{name: "github ssh", remoteOpt: gitRemoteGithubPrivate, protocol: gitProtocolSSH, wantHTTPS: false},
+		{name: "github https", remoteOpt: gitRemoteGithubPublic, protocol: gitProtocolHTTPS, wantHTTPS: true},
+		{name: "existing url ignores protocol", remoteOpt: gitRemoteExisting, protocol: gitProtocolHTTPS, wantHTTPS: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newDetectedGitModel()
+			m.remoteOpt = tt.remoteOpt
+			m.protocolOpt = tt.protocol
+			m.repoNameInput = "repo"
+
+			cfg := m.Config()
+			if cfg.RemoteHTTPS != tt.wantHTTPS {
+				t.Fatalf("RemoteHTTPS = %v, want %v", cfg.RemoteHTTPS, tt.wantHTTPS)
+			}
+			if tt.remoteOpt == gitRemoteExisting {
+				return
+			}
+			reopened := Git(80, 24, "/home/user/myproject", cfg)
+			if reopened.protocolOpt != tt.protocol || reopened.remoteOpt != tt.remoteOpt {
+				t.Errorf("reopened protocol=%d remote=%d, want %d/%d", reopened.protocolOpt, reopened.remoteOpt, tt.protocol, tt.remoteOpt)
+			}
+		})
+	}
+}
+
+func TestMoveCursor_ProtocolOnlyForGithub(t *testing.T) {
+	m := newDetectedGitModel()
+	m.cursor = gitFieldRepoName
+	m.remoteOpt = gitRemoteGithubPublic
+	m.moveCursor(1)
+	if m.cursor != gitFieldProtocol {
+		t.Errorf("cursor = %d, want gitFieldProtocol for a GitHub remote", m.cursor)
+	}
+
+	m.remoteOpt = gitRemoteExisting
+	m.cursor = gitFieldRemote
+	m.moveCursor(1)
+	if m.cursor != gitFieldURL {
+		t.Errorf("cursor = %d, want gitFieldURL for an existing URL", m.cursor)
+	}
+}

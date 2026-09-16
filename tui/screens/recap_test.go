@@ -185,3 +185,10 @@ func TestRecap_InvalidProjectNameBlocksConfirm(t *testing.T) {
 		})
 	}
 }
+
+func TestGitValue_GithubHTTPS(t *testing.T) {
+	got := gitValue(GitConfig{InitLocal: true, RemoteHost: "github", RemotePrivate: true, RemoteHTTPS: true, RepoName: "repo"})
+	if !strings.Contains(got, "github (private, https): repo") {
+		t.Errorf("gitValue() = %q, want the https protocol shown", got)
+	}
+}

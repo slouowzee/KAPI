@@ -118,7 +118,7 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 			name = filepath.Base(targetDir)
 		}
 		private := gitCfg.RemotePrivate
-		sshURL := new(string)
+		remoteURL := new(string)
 
 		visibility := "public"
 		if private {
@@ -135,14 +135,17 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 					if err != nil {
 						return err
 					}
-					*sshURL = repo.SSHURL
+					*remoteURL = repo.SSHURL
+					if gitCfg.RemoteHTTPS {
+						*remoteURL = repo.CloneURL
+					}
 					return nil
 				},
 			},
 			{
 				Label: "git remote add origin <github url>",
 				Fn: func() error {
-					return gitSilentCmd(targetDir, "remote", "add", "origin", *sshURL).Run()
+					return gitSilentCmd(targetDir, "remote", "add", "origin", *remoteURL).Run()
 				},
 			},
 		}

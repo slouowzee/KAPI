@@ -267,11 +267,14 @@ func (m RecapModel) gitValue() string {
 	switch m.gitCfg.RemoteHost {
 	case "github":
 		v := "github"
+		visibility := "public"
 		if m.gitCfg.RemotePrivate {
-			v += " (private)"
-		} else {
-			v += " (public)"
+			visibility = "private"
 		}
+		if m.gitCfg.RemoteHTTPS {
+			visibility += ", https"
+		}
+		v += " (" + visibility + ")"
 		if m.gitCfg.RepoName != "" {
 			v += ": " + m.gitCfg.RepoName
 		}
