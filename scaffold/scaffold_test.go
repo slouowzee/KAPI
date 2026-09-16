@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slouowzee/kapi/internal/gitconfig"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/registry"
-	"github.com/slouowzee/kapi/tui/screens"
 )
 
 func TestRemoteSteps_GithubPrivate_UsesRepoName(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: true,
 		RepoName:      "my-awesome-repo",
@@ -29,7 +29,7 @@ func TestRemoteSteps_GithubPrivate_UsesRepoName(t *testing.T) {
 }
 
 func TestRemoteSteps_GithubPublic_UsesRepoName(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: false,
 		RepoName:      "public-lib",
@@ -45,7 +45,7 @@ func TestRemoteSteps_GithubPublic_UsesRepoName(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_FallsBackToDirBasename(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: true,
 		RepoName:      "",
@@ -61,7 +61,7 @@ func TestRemoteSteps_Github_FallsBackToDirBasename(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_PrivateLabel(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: true,
 		RepoName:      "repo",
@@ -74,7 +74,7 @@ func TestRemoteSteps_Github_PrivateLabel(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_PublicLabel(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: false,
 		RepoName:      "repo",
@@ -87,7 +87,7 @@ func TestRemoteSteps_Github_PublicLabel(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_ReturnsThreeSteps(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "github", RepoName: "repo", InitialCommit: true}
+	cfg := gitconfig.GitConfig{RemoteHost: "github", RepoName: "repo", InitialCommit: true}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if len(steps) != 3 {
@@ -96,7 +96,7 @@ func TestRemoteSteps_Github_ReturnsThreeSteps(t *testing.T) {
 }
 
 func TestRemoteSteps_ExistingURL_ReturnsTwoSteps(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "custom",
 		RemoteURL:     "git@mygit.internal:user/repo.git",
 		InitialCommit: true,
@@ -110,7 +110,7 @@ func TestRemoteSteps_ExistingURL_ReturnsTwoSteps(t *testing.T) {
 
 func TestRemoteSteps_ExistingURL_ContainsURL(t *testing.T) {
 	const url = "git@mygit.internal:user/repo.git"
-	cfg := screens.GitConfig{RemoteHost: "custom", RemoteURL: url}
+	cfg := gitconfig.GitConfig{RemoteHost: "custom", RemoteURL: url}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if !strings.Contains(steps[0].Label, url) {
@@ -119,7 +119,7 @@ func TestRemoteSteps_ExistingURL_ContainsURL(t *testing.T) {
 }
 
 func TestRemoteSteps_NoRemote_ReturnsNil(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "", RemoteURL: ""}
+	cfg := gitconfig.GitConfig{RemoteHost: "", RemoteURL: ""}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if steps != nil {
@@ -128,7 +128,7 @@ func TestRemoteSteps_NoRemote_ReturnsNil(t *testing.T) {
 }
 
 func TestRemoteSteps_CustomHost_NoURL_ReturnsNil(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "custom", RemoteURL: ""}
+	cfg := gitconfig.GitConfig{RemoteHost: "custom", RemoteURL: ""}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if steps != nil {
@@ -367,11 +367,11 @@ func TestGitlabCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
 func TestRemoteSteps_ExistingRemote_ReturnsNil(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  screens.GitConfig
+		cfg  gitconfig.GitConfig
 	}{
-		{name: "github origin", cfg: screens.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "github", RemoteURL: "git@github.com:me/app.git"}},
-		{name: "gitlab origin", cfg: screens.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "gitlab", RemoteURL: "git@gitlab.com:me/app.git"}},
-		{name: "custom origin", cfg: screens.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "custom", RemoteURL: "git@mygit.internal:me/app.git"}},
+		{name: "github origin", cfg: gitconfig.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "github", RemoteURL: "git@github.com:me/app.git"}},
+		{name: "gitlab origin", cfg: gitconfig.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "gitlab", RemoteURL: "git@gitlab.com:me/app.git"}},
+		{name: "custom origin", cfg: gitconfig.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "custom", RemoteURL: "git@mygit.internal:me/app.git"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,7 +402,7 @@ func hasLabel(steps []Step, prefix string) bool {
 func TestPlan_GitSteps(t *testing.T) {
 	tests := []struct {
 		name      string
-		cfg       screens.GitConfig
+		cfg       gitconfig.GitConfig
 		wantInit  bool
 		wantDev   bool
 		wantPush  bool
@@ -411,22 +411,22 @@ func TestPlan_GitSteps(t *testing.T) {
 	}{
 		{
 			name:     "init without initial commit",
-			cfg:      screens.GitConfig{InitLocal: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
+			cfg:      gitconfig.GitConfig{InitLocal: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
 			wantInit: true, wantRepo: false, wantPush: false,
 		},
 		{
 			name:     "init with initial commit pushes",
-			cfg:      screens.GitConfig{InitLocal: true, InitialCommit: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
+			cfg:      gitconfig.GitConfig{InitLocal: true, InitialCommit: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
 			wantInit: true, wantPush: true,
 		},
 		{
 			name:      "no repo skips remote and dev branch",
-			cfg:       screens.GitConfig{Collab: true, RemoteHost: "github", RepoName: "app"},
+			cfg:       gitconfig.GitConfig{Collab: true, RemoteHost: "github", RepoName: "app"},
 			wantFiles: true,
 		},
 		{
 			name:      "collab with repo creates dev branch",
-			cfg:       screens.GitConfig{InitLocal: true, InitialCommit: true, Collab: true},
+			cfg:       gitconfig.GitConfig{InitLocal: true, InitialCommit: true, Collab: true},
 			wantInit:  true,
 			wantDev:   true,
 			wantFiles: true,
@@ -465,7 +465,7 @@ func indexOfLabel(steps []Step, prefix string) int {
 }
 
 func TestPlan_CollabAndCIAreCommittedBeforePush(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		InitLocal:     true,
 		InitialCommit: true,
 		Collab:        true,
@@ -502,7 +502,7 @@ func TestPlan_CollabAndCIAreCommittedBeforePush(t *testing.T) {
 }
 
 func TestPlan_CollabWithoutRemote_NoDevPush(t *testing.T) {
-	cfg := screens.GitConfig{InitLocal: true, InitialCommit: true, Collab: true}
+	cfg := gitconfig.GitConfig{InitLocal: true, InitialCommit: true, Collab: true}
 	steps := Plan("/tmp/x/app", fw("laravel"), nil, cfg, packagemanager.None)
 
 	if indexOfLabel(steps, "git push") != -1 {
@@ -653,7 +653,7 @@ func TestFrameworkSteps_ViteTemplateFlags(t *testing.T) {
 }
 
 func TestPlan_JSWithoutPackageManager_DefaultsToNpm(t *testing.T) {
-	steps := Plan("/tmp/x/app", jsfw("nestjs"), nil, screens.GitConfig{}, packagemanager.None)
+	steps := Plan("/tmp/x/app", jsfw("nestjs"), nil, gitconfig.GitConfig{}, packagemanager.None)
 	if want := "npx @nestjs/cli@latest new app --package-manager npm"; steps[0].Label != want {
 		t.Errorf("label = %q, want %q", steps[0].Label, want)
 	}
