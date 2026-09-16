@@ -43,7 +43,7 @@ changelog:
       - '^docs:'
       - '^test:'
 
-brews:
+homebrew_casks:
   - name: kapi
     repository:
       owner: slouowzee
@@ -52,12 +52,16 @@ brews:
     commit_author:
       name: GoReleaser Bot
       email: bot@goreleaser.com
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    directory: Formula
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
     homepage: "https://github.com/slouowzee/kapi"
     description: "A Go-based interactive TUI CLI for project scaffolding"
-    test: |
-      system "#{bin}/kapi --version"
+    hooks:
+      post:
+        # The binary is not notarized: drop the quarantine flag on macOS.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kapi"]
+          end
 
 nfpms:
   - id: kapi
