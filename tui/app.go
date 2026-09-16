@@ -115,6 +115,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// NOTE: while scaffolding, ctrl+c asks for confirmation and q is ignored
+		// so that running commands are stopped and cleaned up properly.
+		if a.screen == ScreenExec && a.exec.IsBusy() {
+			break
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit

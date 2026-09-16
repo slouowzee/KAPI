@@ -18,11 +18,13 @@ import (
 	"github.com/slouowzee/kapi/internal/registry"
 )
 
+// Step is one scaffolding action. StreamFn must stop its command when ctx is
+// cancelled, which happens when the user aborts.
 type Step struct {
 	Label    string
 	Cmd      *exec.Cmd
 	Fn       func() error
-	StreamFn func(onLine func(string)) error
+	StreamFn func(ctx context.Context, onLine func(string)) error
 }
 
 func Plan(
@@ -480,24 +482,32 @@ func gitSilentCmd(targetDir string, args ...string) *exec.Cmd {
 	return c
 }
 
-func streamCmd(dir string, name string, args ...string) func(onLine func(string)) error {
-	return func(onLine func(string)) error {
-		c := exec.Command(name, args...)
+type streamFunc = func(ctx context.Context, onLine func(string)) error
+
+// abortGracePeriod is how long an aborted command gets to exit after being
+// signalled before its pipes are forcibly closed.
+const abortGracePeriod = 5 * time.Second
+
+func streamCmd(dir string, name string, args ...string) streamFunc {
+	return func(ctx context.Context, onLine func(string)) error {
+		c := exec.CommandContext(ctx, name, args...)
 		if dir != "" {
 			c.Dir = dir
 		}
+		configureCancel(c)
+		c.WaitDelay = abortGracePeriod
 		return runStreamed(c, onLine)
 	}
 }
 
-func streamCmdSlice(dir string, argv []string) func(onLine func(string)) error {
+func streamCmdSlice(dir string, argv []string) streamFunc {
 	if len(argv) == 0 {
-		return func(onLine func(string)) error { return nil }
+		return func(context.Context, func(string)) error { return nil }
 	}
 	return streamCmd(dir, argv[0], argv[1:]...)
 }
 
-func streamGitCmd(targetDir string, args ...string) func(onLine func(string)) error {
+func streamGitCmd(targetDir string, args ...string) streamFunc {
 	return streamCmd(targetDir, "git", args...)
 }
 

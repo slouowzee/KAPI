@@ -1,6 +1,8 @@
 package screens
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,8 +18,10 @@ type ExecStep struct {
 	Label    string
 	Cmd      *exec.Cmd
 	Fn       func() error
-	StreamFn func(onLine func(string)) error
+	StreamFn func(ctx context.Context, onLine func(string)) error
 }
+
+var errAborted = errors.New("aborted by user")
 
 type execStepDoneMsg struct{ err error }
 type execAllDoneMsg struct{}
@@ -46,6 +50,12 @@ type ExecModel struct {
 	dirExistedBefore bool
 	preDirEntries    []string
 
+	// ctx is cancelled when the user aborts; running streamed commands stop.
+	ctx          context.Context
+	cancel       context.CancelFunc
+	abortPending bool
+	aborted      bool
+
 	shellWrapperActive bool
 	confirmCleanup     bool
 	cleanupCursor      int
@@ -65,11 +75,14 @@ type streamResult struct {
 }
 
 func NewExec(width, height int, steps []ExecStep, targetDir string) ExecModel {
+	ctx, cancel := context.WithCancel(context.Background())
 	m := ExecModel{
 		width:              width,
 		height:             height,
 		steps:              steps,
 		targetDir:          targetDir,
+		ctx:                ctx,
+		cancel:             cancel,
 		shellWrapperActive: os.Getenv("KAPI_SHELL_WRAPPER") == "1",
 	}
 
@@ -100,6 +113,18 @@ func (m ExecModel) CdRequested() bool         { return m.cdRequested }
 func (m ExecModel) ShouldReturnToRecap() bool { return m.returnToRecap }
 func (m *ExecModel) ConsumeReturnToRecap()    { m.returnToRecap = false }
 
+func (m ExecModel) stopCommands() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+}
+
+// IsBusy reports whether steps or the cleanup are still running; quitting at
+// that point would leave a half-created project behind.
+func (m ExecModel) IsBusy() bool {
+	return m.cleaningUp || (!m.done && !m.promptCD && !m.confirmCleanup)
+}
+
 func (m ExecModel) Init() tea.Cmd {
 	if len(m.steps) == 0 {
 		return func() tea.Msg { return execAllDoneMsg{} }
@@ -123,11 +148,15 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		return m, m.readOneResult()
 
 	case execAllDoneMsg:
+		m.stopCommands()
 		m.promptCD = true
 		return m, nil
 
 	case execStepDoneMsg:
 		m.streamChan = nil
+		if m.aborted {
+			msg.err = errAborted
+		}
 		if msg.err != nil {
 			m.lastErr = msg.err
 			if m.targetDir == "" || !m.hasCreatedEntries() {
@@ -155,6 +184,21 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.IsBusy() && !m.cleaningUp {
+			switch msg.String() {
+			case "ctrl+c":
+				if !m.abortPending {
+					m.abortPending = true
+					break
+				}
+				m.abortPending = false
+				m.aborted = true
+				m.stopCommands()
+			case "esc":
+				m.abortPending = false
+			}
+			break
+		}
 		if m.confirmCleanup {
 			switch msg.String() {
 			case "up", "k", "left", "h":
@@ -220,8 +264,9 @@ func (m ExecModel) runCurrentStep() tea.Cmd {
 	case step.StreamFn != nil:
 		ch := make(chan streamResult, 64)
 		fn := step.StreamFn
+		ctx := m.ctx
 		go func() {
-			err := fn(func(line string) {
+			err := fn(ctx, func(line string) {
 				ch <- streamResult{line: line}
 			})
 			ch <- streamResult{done: true, err: err}
@@ -397,6 +442,10 @@ func (m ExecModel) View() string {
 		}
 	case m.done:
 		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
+	case m.aborted:
+		sb.WriteString(styles.MutedStyle.Render("  Aborting…") + "\n")
+	case m.abortPending:
+		sb.WriteString(styles.ErrorStyle.Render("  Press ctrl+c again to abort, esc to continue") + "\n")
 	default:
 		sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("  Step %d / %d", m.current+1, len(m.steps))) + "\n")
 	}

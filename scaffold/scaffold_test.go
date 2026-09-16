@@ -1,11 +1,14 @@
 package scaffold
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/slouowzee/kapi/internal/gitconfig"
 	"github.com/slouowzee/kapi/internal/packagemanager"
@@ -656,5 +659,28 @@ func TestPlan_JSWithoutPackageManager_DefaultsToNpm(t *testing.T) {
 	steps := Plan("/tmp/x/app", jsfw("nestjs"), nil, gitconfig.GitConfig{}, packagemanager.None)
 	if want := "npx @nestjs/cli@latest new app --package-manager npm"; steps[0].Label != want {
 		t.Errorf("label = %q, want %q", steps[0].Label, want)
+	}
+}
+
+func TestStreamCmd_CancelStopsChildProcesses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are unix only")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- streamCmd("", "sh", "-c", "sleep 30 & sleep 30; wait")(ctx, func(string) {})
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected an error for a cancelled command")
+		}
+	case <-time.After(abortGracePeriod + 3*time.Second):
+		t.Fatal("command did not stop after cancellation")
 	}
 }

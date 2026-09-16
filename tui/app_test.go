@@ -3,8 +3,10 @@ package tui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/tui/screens"
 )
 
 func TestGoToRecap_JSWithoutPackageManager_AsksForIt(t *testing.T) {
@@ -26,5 +28,20 @@ func TestGoToRecap_JSWithoutPackageManager_AsksForIt(t *testing.T) {
 				t.Errorf("screen = %v, want %v", a.screen, tt.wantScreen)
 			}
 		})
+	}
+}
+
+func TestUpdate_CtrlCDuringScaffoldDoesNotQuit(t *testing.T) {
+	a := App{
+		screen: ScreenExec,
+		exec:   screens.NewExec(80, 24, []screens.ExecStep{{Label: "step", Fn: func() error { return nil }}}, ""),
+	}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyCtrlC}, {Type: tea.KeyRunes, Runes: []rune("q")}} {
+		_, cmd := a.Update(key)
+		if cmd != nil {
+			if _, quit := cmd().(tea.QuitMsg); quit {
+				t.Errorf("%q quit the app while scaffolding", key.String())
+			}
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -488,5 +489,46 @@ func TestExecUpdate_ConfirmCleanup(t *testing.T) {
 				t.Error("model should be done after the cleanup choice")
 			}
 		})
+	}
+}
+
+func ctrlC() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyCtrlC} }
+
+func TestExecUpdate_AbortNeedsConfirmation(t *testing.T) {
+	m := NewExec(80, 24, []ExecStep{{Label: "step1", Fn: func() error { return nil }}}, "")
+
+	m, _ = m.Update(ctrlC())
+	if !m.abortPending || m.aborted {
+		t.Fatalf("first ctrl+c should only ask for confirmation (pending=%v aborted=%v)", m.abortPending, m.aborted)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.abortPending {
+		t.Fatal("esc should cancel the pending abort")
+	}
+
+	m, _ = m.Update(ctrlC())
+	m, _ = m.Update(ctrlC())
+	if !m.aborted {
+		t.Fatal("second ctrl+c should abort")
+	}
+	if m.ctx.Err() == nil {
+		t.Error("aborting should cancel the running commands")
+	}
+
+	m, _ = m.Update(execStepDoneMsg{})
+	if !errors.Is(m.Err(), errAborted) {
+		t.Errorf("Err() = %v, want errAborted even if the step succeeded", m.Err())
+	}
+	if m.IsBusy() {
+		t.Error("model should not be busy after the abort")
+	}
+}
+
+func TestExecUpdate_QIgnoredWhileBusy(t *testing.T) {
+	m := NewExec(80, 24, []ExecStep{{Label: "step1", Fn: func() error { return nil }}}, "")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if m.done || m.abortPending {
+		t.Error("q must not stop a running scaffold")
 	}
 }
