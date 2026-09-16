@@ -251,7 +251,7 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 	case "tanstack-start":
 		return jsExecStep(parent, pm, "create-tsrouter-app@latest", name, "--framework", "react", "--add-ons", "start")
 	case "astro":
-		return jsExecStep(parent, pm, "astro@latest", name)
+		return jsCreateStep(parent, pm, "astro@latest", name)
 	case "gatsby":
 		return jsExecStep(parent, pm, "gatsby", "new", name)
 	case "sveltekit":
@@ -259,7 +259,7 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 	case "analog":
 		return jsExecStep(parent, pm, "create-nx-workspace@latest", name, "--preset=@analogjs/platform")
 	case "hono":
-		return jsExecStep(parent, pm, "hono@latest", name)
+		return jsCreateStep(parent, pm, "hono@latest", name)
 	case "react-native":
 		return jsExecStep(parent, pm, "@react-native-community/cli@latest", "init", name)
 
@@ -290,6 +290,13 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 
 func jsExecStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
 	argv := append(append([]string(nil), pm.ExecArgs()...), pkg)
+	argv = append(argv, extra...)
+	return []Step{{Label: strings.Join(argv, " "), Cmd: cmdSlice(dir, argv)}}
+}
+
+// jsCreateStep runs an interactive `<pm> create <pkg>` initializer.
+func jsCreateStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
+	argv := append(append([]string(nil), pm.CreateArgs()...), pkg)
 	argv = append(argv, extra...)
 	return []Step{{Label: strings.Join(argv, " "), Cmd: cmdSlice(dir, argv)}}
 }

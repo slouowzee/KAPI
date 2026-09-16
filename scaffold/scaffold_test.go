@@ -603,3 +603,31 @@ func TestMergeGitignoreFn(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestFrameworkSteps_JSInitializers(t *testing.T) {
+	tests := []struct {
+		id              string
+		pm              packagemanager.PM
+		wantLabel       string
+		wantInteractive bool
+	}{
+		{id: "astro", pm: packagemanager.NPM, wantLabel: "npm create astro@latest app", wantInteractive: true},
+		{id: "astro", pm: packagemanager.Bun, wantLabel: "bun create astro@latest app", wantInteractive: true},
+		{id: "hono", pm: packagemanager.NPM, wantLabel: "npm create hono@latest app", wantInteractive: true},
+		{id: "hono", pm: packagemanager.PNPM, wantLabel: "pnpm create hono@latest app", wantInteractive: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id+"/"+tt.pm.String(), func(t *testing.T) {
+			steps := frameworkSteps("/tmp/x/app", jsfw(tt.id), tt.pm)
+			if len(steps) != 1 {
+				t.Fatalf("expected 1 step, got %d", len(steps))
+			}
+			if steps[0].Label != tt.wantLabel {
+				t.Errorf("label = %q, want %q", steps[0].Label, tt.wantLabel)
+			}
+			if (steps[0].Cmd != nil) != tt.wantInteractive {
+				t.Errorf("interactive = %v, want %v", steps[0].Cmd != nil, tt.wantInteractive)
+			}
+		})
+	}
+}
