@@ -151,13 +151,14 @@ func listFrozen() {
 }
 
 func findExactPackage(ctx context.Context, name string) (*packages.Package, string) {
-	res := packages.FetchDefaults(ctx, []string{name}, false)
-	if len(res) > 0 && len(res[0].Versions) > 0 {
-		return &res[0], "npm"
-	}
-	res = packages.FetchDefaults(ctx, []string{name}, true)
-	if len(res) > 0 && len(res[0].Versions) > 0 {
-		return &res[0], "packagist"
+	for _, reg := range []struct {
+		name  string
+		isPhp bool
+	}{{"npm", false}, {"packagist", true}} {
+		versions, err := packages.FetchVersions(ctx, name, reg.isPhp)
+		if err == nil && len(versions) > 0 {
+			return &packages.Package{Name: name, Versions: versions}, reg.name
+		}
 	}
 	return nil, ""
 }
@@ -172,30 +173,40 @@ func fuzzySearchPackage(ctx context.Context, query string) (*packages.Package, s
 	packagistRes, _ := packages.SearchPackagist(ctx, query)
 
 	for i := 0; i < len(npmRes) && i < 25; i++ {
-		if len(npmRes[i].Versions) > 0 {
-			results = append(results, struct {
-				pkg packages.Package
-				reg string
-			}{npmRes[i], "npm"})
-		}
+		results = append(results, struct {
+			pkg packages.Package
+			reg string
+		}{npmRes[i], "npm"})
 	}
 	for i := 0; i < len(packagistRes) && i < 25; i++ {
-		if len(packagistRes[i].Versions) > 0 {
-			results = append(results, struct {
-				pkg packages.Package
-				reg string
-			}{packagistRes[i], "packagist"})
-		}
+		results = append(results, struct {
+			pkg packages.Package
+			reg string
+		}{packagistRes[i], "packagist"})
 	}
 
 	if len(results) == 0 {
 		return nil, ""
 	}
 
-	if len(results) == 1 {
-		return &results[0].pkg, results[0].reg
+	choice := 0
+	if len(results) > 1 {
+		choice = promptPackageChoice(results)
 	}
+	selected := results[choice]
 
+	versions, err := packages.FetchVersions(ctx, selected.pkg.Name, selected.reg == "packagist")
+	if err != nil || len(versions) == 0 {
+		return nil, ""
+	}
+	selected.pkg.Versions = versions
+	return &selected.pkg, selected.reg
+}
+
+func promptPackageChoice(results []struct {
+	pkg packages.Package
+	reg string
+}) int {
 	var choices []string
 	for _, r := range results {
 		desc := r.pkg.Description
@@ -209,7 +220,7 @@ func fuzzySearchPackage(ctx context.Context, query string) (*packages.Package, s
 	if err != nil {
 		os.Exit(1)
 	}
-	return &results[choice].pkg, results[choice].reg
+	return choice
 }
 
 func promptForVersion(pkg *packages.Package) string {

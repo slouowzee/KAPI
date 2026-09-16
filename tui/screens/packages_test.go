@@ -181,3 +181,45 @@ func TestFreezeActionMsg_SyncsCartPins(t *testing.T) {
 		})
 	}
 }
+
+func TestPackages_FreezeLoadsVersionsOnDemand(t *testing.T) {
+	m := PackagesModel{results: []packages.Package{{Name: "zod"}}}
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	if cmd == nil || m.versionsFor != "zod" || m.selectVersion {
+		t.Fatalf("ctrl+g should request versions (cmd=%v versionsFor=%q select=%v)", cmd != nil, m.versionsFor, m.selectVersion)
+	}
+
+	m, _ = m.Update(versionsLoadedMsg{name: "other", versions: []string{"1.0.0"}})
+	if m.selectVersion {
+		t.Fatal("versions of another package must be ignored")
+	}
+
+	m, _ = m.Update(versionsLoadedMsg{name: "zod", versions: []string{"3.0.0", "2.0.0"}})
+	if !m.selectVersion || m.freezeTargetName != "zod" || len(m.versionList) != 2 {
+		t.Errorf("version picker not opened: select=%v target=%q versions=%v", m.selectVersion, m.freezeTargetName, m.versionList)
+	}
+}
+
+func TestPackages_StarsRequestedOnceForFocusedPackage(t *testing.T) {
+	m := PackagesModel{results: []packages.Package{{Name: "zod", GithubRepo: "colinhacks/zod"}, {Name: "no-repo"}}}
+
+	m, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if cmd == nil {
+		t.Fatal("stars of the focused package should be requested")
+	}
+	m, cmd = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if cmd != nil {
+		t.Error("stars must not be requested twice")
+	}
+
+	m, _ = m.Update(starsLoadedMsg{repo: "colinhacks/zod", stars: 30000})
+	if m.stars["colinhacks/zod"] != 30000 {
+		t.Errorf("stars = %d, want 30000", m.stars["colinhacks/zod"])
+	}
+
+	m.cursor = 1
+	if _, cmd = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd != nil {
+		t.Error("packages without repository must not trigger a request")
+	}
+}

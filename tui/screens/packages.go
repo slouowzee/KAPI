@@ -72,16 +72,40 @@ type freezeActionMsg struct {
 	freezeData map[string]config.FreezeVersionPackage
 }
 
-func searchCmd(query string, isPhp bool) tea.Cmd {
+func searchCmd(ctx context.Context, query string, isPhp bool) tea.Cmd {
 	return func() tea.Msg {
 		var results []packages.Package
 		var err error
 		if isPhp {
-			results, err = packages.SearchPackagist(context.Background(), query)
+			results, err = packages.SearchPackagist(ctx, query)
 		} else {
-			results, err = packages.SearchNpm(context.Background(), query)
+			results, err = packages.SearchNpm(ctx, query)
 		}
 		return searchResultMsg{query: query, results: results, err: err}
+	}
+}
+
+type starsLoadedMsg struct {
+	repo  string
+	stars int64
+}
+
+func loadStarsCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		return starsLoadedMsg{repo: repo, stars: packages.Stars(context.Background(), repo)}
+	}
+}
+
+type versionsLoadedMsg struct {
+	name     string
+	versions []string
+	err      error
+}
+
+func loadVersionsCmd(name string, isPhp bool) tea.Cmd {
+	return func() tea.Msg {
+		versions, err := packages.FetchVersions(context.Background(), name, isPhp)
+		return versionsLoadedMsg{name: name, versions: versions, err: err}
 	}
 }
 
@@ -154,6 +178,13 @@ type PackagesModel struct {
 	done          bool
 	backPressed   bool
 	backCancelled bool
+
+	// stars caches GitHub stars by repository; they are fetched only for the
+	// package being looked at to stay within GitHub rate limits.
+	stars        map[string]int64
+	searchCancel context.CancelFunc
+	// versionsFor is the package whose versions are being fetched for a freeze.
+	versionsFor string
 
 	savedCart    []packages.Package
 	freezeData   map[string]config.FreezeVersionPackage
@@ -464,6 +495,44 @@ func (m *PackagesModel) toggleFavorite(pkg packages.Package) tea.Cmd {
 }
 
 func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
+	m, cmd := m.update(msg)
+	if starsCmd := m.requestFocusedStars(); starsCmd != nil {
+		return m, tea.Batch(cmd, starsCmd)
+	}
+	return m, cmd
+}
+
+// focusedPackage returns the package shown in the detail panel.
+func (m PackagesModel) focusedPackage() (packages.Package, bool) {
+	if m.inFreezeView {
+		if entry, ok := m.currentFrozenEntry(); ok {
+			if pkg := m.findPackageByName(entry.Name); pkg != nil {
+				return *pkg, true
+			}
+		}
+		return packages.Package{}, false
+	}
+	return m.currentPackage()
+}
+
+// requestFocusedStars fetches the stars of the focused package once.
+func (m *PackagesModel) requestFocusedStars() tea.Cmd {
+	pkg, ok := m.focusedPackage()
+	if !ok || pkg.GithubRepo == "" {
+		return nil
+	}
+	if _, known := m.stars[pkg.GithubRepo]; known {
+		return nil
+	}
+	if m.stars == nil {
+		m.stars = make(map[string]int64)
+	}
+	// NOTE: 0 marks the request as in flight; the loaded value replaces it.
+	m.stars[pkg.GithubRepo] = 0
+	return loadStarsCmd(pkg.GithubRepo)
+}
+
+func (m PackagesModel) update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -483,7 +552,37 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 	case debounceMsg:
 		if msg.query == m.query {
 			m.searching = true
-			return m, searchCmd(m.query, m.isPhp)
+			// NOTE: a newer query makes the previous search useless.
+			if m.searchCancel != nil {
+				m.searchCancel()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			m.searchCancel = cancel
+			return m, searchCmd(ctx, m.query, m.isPhp)
+		}
+
+	case starsLoadedMsg:
+		if m.stars == nil {
+			m.stars = make(map[string]int64)
+		}
+		m.stars[msg.repo] = msg.stars
+
+	case versionsLoadedMsg:
+		if msg.name != m.versionsFor {
+			break
+		}
+		m.versionsFor = ""
+		switch {
+		case msg.err != nil:
+			m.freezeStatus = "Error: " + msg.err.Error()
+		case len(msg.versions) == 0:
+			m.freezeStatus = "No versions available for " + msg.name
+		default:
+			m.freezeStatus = ""
+			m.freezeTargetName = msg.name
+			m.versionList = msg.versions
+			m.versionCursor = 0
+			m.selectVersion = true
 		}
 
 	case searchResultMsg:
@@ -582,15 +681,9 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 					m.freezeStatus = "Unfreezing " + pkg.Name + "..."
 					return m, unfreezeTuiCmd(pkg.Name, m.isPhp)
 				}
-				if len(pkg.Versions) == 0 {
-					m.freezeStatus = "No versions available for " + pkg.Name
-					break
-				}
-				m.freezeTargetName = pkg.Name
-				m.versionList = pkg.Versions
-				m.versionCursor = 0
-				m.selectVersion = true
-				m.freezeStatus = ""
+				m.versionsFor = pkg.Name
+				m.freezeStatus = "Loading versions of " + pkg.Name + "..."
+				return m, loadVersionsCmd(pkg.Name, m.isPhp)
 			}
 
 		case "esc":
@@ -1238,8 +1331,8 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 				if entry.Note != "" {
 					sb.WriteString(styles.MutedStyle.Render("Note     ") + styles.DimStyle.Render(entry.Note) + "\n")
 				}
-				if pkg.Stars > 0 {
-					sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(pkg.Stars)) + "\n")
+				if stars := m.stars[pkg.GithubRepo]; stars > 0 {
+					sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(stars)) + "\n")
 				}
 				if pkg.Weekly > 0 {
 					label := "Weekly   "
@@ -1308,8 +1401,8 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 		fd, isFrozen := m.freezeData[pkg.Name]
 		if isFrozen {
 			displayVersion = fd.Version
-		} else if len(pkg.Versions) > 0 {
-			displayVersion = pkg.Versions[0]
+		} else {
+			displayVersion = pkg.LatestVersion
 		}
 		if displayVersion != "" {
 			versionLabel := styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(displayVersion)
@@ -1321,8 +1414,8 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 		if isFrozen && fd.Note != "" {
 			sb.WriteString(styles.MutedStyle.Render("Note     ") + styles.DimStyle.Render(fd.Note) + "\n")
 		}
-		if pkg.Stars > 0 {
-			sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(pkg.Stars)) + "\n")
+		if stars := m.stars[pkg.GithubRepo]; stars > 0 {
+			sb.WriteString(styles.MutedStyle.Render("Stars    ") + styles.SubtitleStyle.Render(formatNum(stars)) + "\n")
 		}
 		if pkg.Weekly > 0 {
 			label := "Weekly   "
