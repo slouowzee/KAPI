@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -451,5 +452,85 @@ func TestPlan_GitSteps(t *testing.T) {
 				t.Errorf("collab files present = %v, want %v (%v)", got, tt.wantFiles, stepLabels(steps))
 			}
 		})
+	}
+}
+
+func indexOfLabel(steps []Step, prefix string) int {
+	for i, l := range stepLabels(steps) {
+		if strings.HasPrefix(l, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestPlan_CollabAndCIAreCommittedBeforePush(t *testing.T) {
+	cfg := screens.GitConfig{
+		InitLocal:     true,
+		InitialCommit: true,
+		Collab:        true,
+		CI:            "github",
+		RemoteHost:    "custom",
+		RemoteURL:     "git@host:me/app.git",
+	}
+	steps := Plan("/tmp/x/app", fw("laravel"), nil, cfg, packagemanager.None)
+
+	commit := indexOfLabel(steps, "git add -A")
+	order := []struct {
+		label  string
+		before bool
+	}{
+		{label: "write CONTRIBUTING.md", before: true},
+		{label: "write .github/workflows/ci.yml", before: true},
+		{label: "git push -u origin HEAD", before: false},
+		{label: "create dev branch", before: false},
+		{label: "git push -u origin dev", before: false},
+	}
+	for _, o := range order {
+		idx := indexOfLabel(steps, o.label)
+		if idx == -1 {
+			t.Errorf("missing step %q in %v", o.label, stepLabels(steps))
+			continue
+		}
+		if (idx < commit) != o.before {
+			t.Errorf("step %q at %d, initial commit at %d (before=%v)", o.label, idx, commit, o.before)
+		}
+	}
+	if indexOfLabel(steps, "git push -u origin HEAD") > indexOfLabel(steps, "create dev branch") {
+		t.Error("default branch must be pushed before dev is created")
+	}
+}
+
+func TestPlan_CollabWithoutRemote_NoDevPush(t *testing.T) {
+	cfg := screens.GitConfig{InitLocal: true, InitialCommit: true, Collab: true}
+	steps := Plan("/tmp/x/app", fw("laravel"), nil, cfg, packagemanager.None)
+
+	if indexOfLabel(steps, "git push") != -1 {
+		t.Errorf("no push expected without remote, got %v", stepLabels(steps))
+	}
+}
+
+func TestDevBranchStep_KeepsExistingBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("commit", "-q", "--allow-empty", "-m", "init")
+	run("branch", "dev")
+
+	for i := 0; i < 2; i++ {
+		if err := devBranchStep(dir).Fn(); err != nil {
+			t.Fatalf("devBranchStep run %d: %v", i, err)
+		}
 	}
 }

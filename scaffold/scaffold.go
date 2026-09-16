@@ -40,9 +40,11 @@ func Plan(
 		steps = append(steps, packageSteps(targetDir, fw, selectedPkgs, pm)...)
 	}
 
-	hasRepo := gitCfg.InitLocal || gitCfg.HasExistingGit
+	newRepo := gitCfg.InitLocal && !gitCfg.HasExistingGit
+	hasRepo := newRepo || gitCfg.HasExistingGit
+	hasCommit := gitCfg.HasExistingGit || (newRepo && gitCfg.InitialCommit)
 
-	if gitCfg.InitLocal && !gitCfg.HasExistingGit {
+	if newRepo {
 		steps = append(steps, Step{
 			Label:    "git init",
 			StreamFn: streamCmd(targetDir, "git", "init"),
@@ -53,13 +55,12 @@ func Plan(
 				Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
 			})
 		}
-		if gitCfg.InitialCommit {
-			steps = append(steps, initialCommitStep(targetDir))
-		}
 	}
 
+	// NOTE: generated files are written before the initial commit so that
+	// they end up in the pushed history.
 	if gitCfg.Collab {
-		steps = append(steps, collabSteps(targetDir, hasRepo)...)
+		steps = append(steps, collabFileSteps(targetDir)...)
 	}
 
 	switch gitCfg.CI {
@@ -69,8 +70,27 @@ func Plan(
 		steps = append(steps, ciGitlabStep(targetDir, fw, pm))
 	}
 
-	if hasRepo {
-		steps = append(steps, remoteSteps(targetDir, gitCfg)...)
+	if newRepo && gitCfg.InitialCommit {
+		steps = append(steps, initialCommitStep(targetDir))
+	}
+
+	if !hasRepo {
+		return steps
+	}
+
+	remote := remoteSteps(targetDir, gitCfg)
+	steps = append(steps, remote...)
+
+	// NOTE: dev is created after the default branch has been pushed, otherwise
+	// only dev would reach the remote and become its default branch.
+	if gitCfg.Collab && hasCommit {
+		steps = append(steps, devBranchStep(targetDir))
+		if len(remote) > 0 {
+			steps = append(steps, Step{
+				Label:    "git push -u origin dev",
+				StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "dev"),
+			})
+		}
 	}
 
 	return steps
@@ -354,15 +374,22 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 	return steps
 }
 
-func collabSteps(targetDir string, hasRepo bool) []Step {
-	var steps []Step
-	if hasRepo {
-		steps = append(steps, Step{
-			Label:    "create dev branch",
-			StreamFn: streamGitCmd(targetDir, "checkout", "-b", "dev"),
-		})
+func devBranchStep(targetDir string) Step {
+	return Step{
+		Label: "create dev branch",
+		Fn: func() error {
+			// NOTE: an existing repository may already have a dev branch; it is
+			// left untouched rather than reset.
+			if gitSilentCmd(targetDir, "rev-parse", "--verify", "--quiet", "refs/heads/dev").Run() == nil {
+				return nil
+			}
+			return gitSilentCmd(targetDir, "checkout", "-b", "dev").Run()
+		},
 	}
-	return append(steps, []Step{
+}
+
+func collabFileSteps(targetDir string) []Step {
+	return []Step{
 		{
 			Label: "write CONTRIBUTING.md",
 			Fn:    writeFileFn(targetDir, "CONTRIBUTING.md", contributingMd),
@@ -379,7 +406,7 @@ func collabSteps(targetDir string, hasRepo bool) []Step {
 			Label: "write .github/ISSUE_TEMPLATE/feature_request.md",
 			Fn:    writeFileFn(targetDir, filepath.Join(".github", "ISSUE_TEMPLATE", "feature_request.md"), featureTemplate),
 		},
-	}...)
+	}
 }
 
 func ciGithubStep(targetDir string, fw registry.Framework, pm packagemanager.PM) Step {
