@@ -320,6 +320,16 @@ func (m *PackagesModel) toggleCart(pkg packages.Package) {
 	m.cart = append(m.cart, pkg)
 }
 
+// syncCartPins applies the current frozen versions to packages already in
+// the cart, so freezing or unfreezing takes effect without re-adding them.
+func (m *PackagesModel) syncCartPins() {
+	cart := slices.Clone(m.cart)
+	for i, p := range cart {
+		cart[i].PinnedVersion = m.freezeData[p.Name].Version
+	}
+	m.cart = cart
+}
+
 func (m PackagesModel) isFavorite(name string) bool {
 	for _, p := range m.favorites {
 		if p.Name == name {
@@ -495,6 +505,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 			m.freezeStatus = "Error: " + msg.err.Error()
 		} else if msg.freezeData != nil {
 			m.freezeData = msg.freezeData
+			m.syncCartPins()
 			if msg.action == "frozen" {
 				m.freezeStatus = "❄ Frozen " + msg.name
 			} else {

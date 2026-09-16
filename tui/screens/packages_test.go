@@ -161,3 +161,23 @@ func TestLoadFreezeData_OnlyCurrentRegistry(t *testing.T) {
 		}
 	}
 }
+
+func TestFreezeActionMsg_SyncsCartPins(t *testing.T) {
+	tests := []struct {
+		name       string
+		freezeData map[string]config.FreezeVersionPackage
+		want       string
+	}{
+		{name: "freeze pins a cart item", freezeData: map[string]config.FreezeVersionPackage{"zod": {Name: "zod", Version: "3.22.0"}}, want: "3.22.0"},
+		{name: "unfreeze clears the pin", freezeData: map[string]config.FreezeVersionPackage{}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := PackagesModel{cart: []packages.Package{{Name: "zod", PinnedVersion: "3.0.0"}}}
+			updated, _ := m.Update(freezeActionMsg{action: "frozen", name: "zod", freezeData: tt.freezeData})
+			if got := updated.cart[0].PinnedVersion; got != tt.want {
+				t.Errorf("PinnedVersion = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
