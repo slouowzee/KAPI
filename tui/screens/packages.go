@@ -3,12 +3,14 @@ package screens
 import (
 	"context"
 	"fmt"
-	"github.com/slouowzee/kapi/internal/config"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
 	"github.com/slouowzee/kapi/tui/styles"
@@ -371,37 +373,65 @@ func (m PackagesModel) frozenPackagesList() []frozenViewEntry {
 	return entries
 }
 
+type favoriteSavedMsg struct {
+	err error
+}
+
+// favoritesSave orders favorite writes: commands run concurrently, so a slow
+// write of an older toggle must not overwrite a newer one.
+var favoritesSave struct {
+	mu      sync.Mutex
+	nextSeq uint64
+	saved   map[string]uint64
+}
+
 func (m *PackagesModel) toggleFavorite(pkg packages.Package) tea.Cmd {
 	isFav := false
 	for i, p := range m.favorites {
 		if p.Name == pkg.Name {
-			m.favorites = append(m.favorites[:i], m.favorites[i+1:]...)
+			m.favorites = slices.Delete(slices.Clone(m.favorites), i, i+1)
 			isFav = true
 			break
 		}
 	}
 	if !isFav {
-		m.favorites = append(m.favorites, pkg)
+		m.favorites = append(slices.Clone(m.favorites), pkg)
 	}
 
 	fwID := m.framework.ID
-	favsToSave := m.favorites
+	// NOTE: the command runs in another goroutine; it gets its own copy so
+	// later toggles cannot mutate the slice while it is being saved.
+	newFavs := make([]config.FavoritePackage, len(m.favorites))
+	for i, f := range m.favorites {
+		newFavs[i] = config.FavoritePackage{Name: f.Name, Description: f.Description}
+	}
+
+	favoritesSave.mu.Lock()
+	favoritesSave.nextSeq++
+	seq := favoritesSave.nextSeq
+	favoritesSave.mu.Unlock()
 
 	return func() tea.Msg {
-		cfg, _ := config.Load()
-		if cfg.Favorites == nil {
-			cfg.Favorites = make(map[string][]config.FavoritePackage)
+		favoritesSave.mu.Lock()
+		defer favoritesSave.mu.Unlock()
+		if favoritesSave.saved == nil {
+			favoritesSave.saved = make(map[string]uint64)
 		}
-		var newFavs []config.FavoritePackage
-		for _, f := range favsToSave {
-			newFavs = append(newFavs, config.FavoritePackage{
-				Name:        f.Name,
-				Description: f.Description,
-			})
+		if seq < favoritesSave.saved[fwID] {
+			return favoriteSavedMsg{}
 		}
-		cfg.Favorites[fwID] = newFavs
-		_ = config.Save(cfg)
-		return nil
+
+		err := config.Update(func(cfg *config.Config) error {
+			if cfg.Favorites == nil {
+				cfg.Favorites = make(map[string][]config.FavoritePackage)
+			}
+			cfg.Favorites[fwID] = newFavs
+			return nil
+		})
+		if err == nil {
+			favoritesSave.saved[fwID] = seq
+		}
+		return favoriteSavedMsg{err: err}
 	}
 }
 
@@ -436,6 +466,11 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 		m.searchErr = msg.err
 		m.results = msg.results
 		m.cursor = 0
+
+	case favoriteSavedMsg:
+		if msg.err != nil {
+			m.freezeStatus = "Error: could not save favorites: " + msg.err.Error()
+		}
 
 	case freezeActionMsg:
 		if msg.err != nil {
