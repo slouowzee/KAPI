@@ -57,6 +57,11 @@ type ExecModel struct {
 	abortPending bool
 	aborted      bool
 
+	// installMode runs package installs in an existing project: no cleanup,
+	// no cd prompt, the user acknowledges the result and goes back.
+	installMode bool
+	ackPending  bool
+
 	shellWrapperActive bool
 	confirmCleanup     bool
 	cleanupCursor      int
@@ -102,6 +107,13 @@ func NewExec(width, height int, steps []ExecStep, targetDir string) ExecModel {
 	return m
 }
 
+// NewInstallExec runs steps that modify an existing project.
+func NewInstallExec(width, height int, steps []ExecStep) ExecModel {
+	m := NewExec(width, height, steps, "")
+	m.installMode = true
+	return m
+}
+
 func (m *ExecModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
@@ -123,7 +135,7 @@ func (m ExecModel) stopCommands() {
 // IsBusy reports whether steps or the cleanup are still running; quitting at
 // that point would leave a half-created project behind.
 func (m ExecModel) IsBusy() bool {
-	return m.cleaningUp || (!m.done && !m.promptCD && !m.confirmCleanup)
+	return m.cleaningUp || (!m.done && !m.promptCD && !m.confirmCleanup && !m.ackPending)
 }
 
 func (m ExecModel) Init() tea.Cmd {
@@ -150,6 +162,10 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 
 	case execAllDoneMsg:
 		m.stopCommands()
+		if m.installMode {
+			m.ackPending = true
+			return m, nil
+		}
 		m.promptCD = true
 		return m, nil
 
@@ -197,6 +213,14 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 				m.stopCommands()
 			case "esc":
 				m.abortPending = false
+			}
+			break
+		}
+		if m.ackPending {
+			switch msg.String() {
+			case "enter", " ", "esc":
+				m.ackPending = false
+				m.done = true
 			}
 			break
 		}
@@ -415,7 +439,14 @@ func (m ExecModel) View() string {
 		sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm   [esc] keep files") + "\n")
 	case m.done && m.lastErr != nil:
 		sb.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  ✗ Error: %s", m.lastErr)) + "\n")
-		sb.WriteString(styles.MutedStyle.Render("  [↵] back to summary") + "\n")
+		if m.installMode {
+			sb.WriteString(styles.MutedStyle.Render("  [↵] back to packages") + "\n")
+		} else {
+			sb.WriteString(styles.MutedStyle.Render("  [↵] back to summary") + "\n")
+		}
+	case m.ackPending:
+		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
+		sb.WriteString(styles.MutedStyle.Render("  [↵] back to menu") + "\n")
 	case m.promptCD:
 		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
 		sb.WriteString("\n")

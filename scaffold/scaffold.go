@@ -365,6 +365,14 @@ func vanillaPhpSteps(targetDir, name string) []Step {
 	}
 }
 
+// InstallPlan returns the steps adding packages to an existing project.
+func InstallPlan(dir string, fw registry.Framework, pkgs []packages.Package, pm packagemanager.PM) []Step {
+	if fw.Ecosystem == "js" && pm == packagemanager.None {
+		pm = packagemanager.NPM
+	}
+	return packageSteps(dir, fw, pkgs, pm)
+}
+
 func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Package, pm packagemanager.PM) []Step {
 	if len(pkgs) == 0 {
 		return nil

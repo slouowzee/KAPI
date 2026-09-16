@@ -571,3 +571,27 @@ func TestFitOutputLine_KeepsANSISequencesIntact(t *testing.T) {
 		t.Errorf("color sequence was cut: %q", got)
 	}
 }
+
+func TestInstallExec_WaitsForAcknowledgement(t *testing.T) {
+	m := NewInstallExec(80, 24, []ExecStep{{Label: "npm install zod", Fn: func() error { return nil }}})
+
+	m, _ = m.Update(execAllDoneMsg{})
+	if m.promptCD || m.Done() || m.IsBusy() {
+		t.Fatalf("install mode should wait for the user (promptCD=%v done=%v busy=%v)", m.promptCD, m.Done(), m.IsBusy())
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.Done() || m.HasErr() {
+		t.Error("enter should acknowledge the install")
+	}
+}
+
+func TestInstallExec_FailureNeverCleansUp(t *testing.T) {
+	m := NewInstallExec(80, 24, []ExecStep{{Label: "npm install zod", Fn: func() error { return nil }}})
+
+	m, _ = m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+	if m.confirmCleanup || m.cleaningUp || !m.Done() {
+		t.Error("installing into an existing project must never offer to remove files")
+	}
+}

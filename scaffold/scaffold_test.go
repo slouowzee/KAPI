@@ -12,6 +12,7 @@ import (
 
 	"github.com/slouowzee/kapi/internal/gitconfig"
 	"github.com/slouowzee/kapi/internal/packagemanager"
+	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
 )
 
@@ -738,5 +739,26 @@ func TestStreamCmd_VeryLongLineDoesNotBlock(t *testing.T) {
 	}
 	if len(lines) == 0 || !strings.Contains(lines[len(lines)-1], "output line too long") {
 		t.Errorf("expected a notice about the long line, got %v", lines)
+	}
+}
+
+func TestInstallPlan(t *testing.T) {
+	tests := []struct {
+		name string
+		fw   registry.Framework
+		pm   packagemanager.PM
+		want string
+	}{
+		{name: "composer project", fw: fw("vanilla-php"), pm: packagemanager.None, want: "composer require laravel/pint"},
+		{name: "js without pm uses npm", fw: jsfw("vanilla-vite"), pm: packagemanager.None, want: "npm install laravel/pint"},
+		{name: "js with detected pm", fw: jsfw("vanilla-vite"), pm: packagemanager.Bun, want: "bun add laravel/pint"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			steps := InstallPlan("/tmp/app", tt.fw, []packages.Package{{Name: "laravel/pint"}}, tt.pm)
+			if len(steps) != 1 || steps[0].Label != tt.want {
+				t.Errorf("steps = %v, want [%q]", stepLabels(steps), tt.want)
+			}
+		})
 	}
 }

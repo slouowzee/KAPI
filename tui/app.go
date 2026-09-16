@@ -173,14 +173,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if updated.IsBrowsePackagesSelected() {
 			a.welcome.ConsumeEnter()
-			eco := updated.Ecosystem()
-			fw := browseFallbackFramework(eco)
 			a.selectedDir = updated.WorkDir()
-			a.selectedFramework = fw
 			a.browseMode = true
-			a.screen = ScreenPackages
-			a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir)
-			return a, a.packages.Init()
+			// NOTE: a project using both composer and npm (e.g. Laravel + Vite)
+			// lets the user pick which registry to browse.
+			if updated.Ecosystem() == ecosystem.ECOSYSTEM_BOTH {
+				a.screen = ScreenEcosystem
+				a.ecosystem = screens.NewEcosystem(a.width, a.height, a.selectedDir)
+				return a, a.ecosystem.Init()
+			}
+			return a.startBrowse(updated.Ecosystem())
 		}
 		if updated.IsUpdateSelected() {
 			a.welcome.ConsumeEnter()
@@ -226,6 +228,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if updated.IsBack() {
 			a.ecosystem.ConsumeBack()
+			if a.browseMode {
+				a.browseMode = false
+				a.screen = ScreenWelcome
+				return a, nil
+			}
 			if a.editMode {
 				a.editMode = false
 				return a.goToRecap()
@@ -235,6 +242,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if updated.Done() {
 			a.ecosystem.ConsumeDone()
+			if a.browseMode {
+				return a.startBrowse(updated.SelectedEcosystem())
+			}
 			newEco := updated.SelectedEcosystem()
 			if a.editMode && newEco != a.selectedEcosystem {
 				a.selectedPackages = nil
@@ -308,9 +318,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated.Done() {
 			a.packages.ConsumeDone()
 			if a.browseMode {
-				a.browseMode = false
-				a.screen = ScreenWelcome
-				return a, nil
+				return a.installBrowsedPackages()
 			}
 			a.selectedPackages = a.packages.SelectedPackages()
 			if a.editMode {
@@ -421,12 +429,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated.Done() {
 			a.recap.ConsumeDone()
 			steps := scaffold.Plan(a.selectedDir, a.selectedFramework, a.selectedPackages, a.selectedGit, a.selectedPM)
-			execSteps := make([]screens.ExecStep, len(steps))
-			for i, s := range steps {
-				execSteps[i] = screens.ExecStep{Label: s.Label, Cmd: s.Cmd, Fn: s.Fn, StreamFn: s.StreamFn}
-			}
 			a.screen = ScreenExec
-			a.exec = screens.NewExec(a.width, a.height, execSteps, a.selectedDir)
+			a.exec = screens.NewExec(a.width, a.height, toExecSteps(steps), a.selectedDir)
 			return a, a.exec.Init()
 		}
 		return a, cmd
@@ -463,11 +467,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if updated.ShouldReturnToRecap() {
 			a.exec.ConsumeReturnToRecap()
+			if a.browseMode {
+				a.screen = ScreenPackages
+				return a, nil
+			}
 			return a.goToRecap()
 		}
 		if updated.Done() {
 			if updated.HasErr() {
 				return a, cmd
+			}
+			if a.browseMode {
+				a.browseMode = false
+				a.screen = ScreenWelcome
+				a.welcome = screens.NewWelcome(a.width, a.height)
+				return a, a.welcome.Init()
 			}
 			if updated.CdRequested() {
 				a.cdDir = a.selectedDir
@@ -552,6 +566,42 @@ func (a App) goToRecap() (App, tea.Cmd) {
 func (a App) FinalDir() string { return a.cdDir }
 
 func (a App) ConfigError() error { return a.configErr }
+
+func (a App) startBrowse(eco ecosystem.Ecosystem) (App, tea.Cmd) {
+	fw := browseFallbackFramework(eco)
+	a.selectedFramework = fw
+	a.screen = ScreenPackages
+	a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir)
+	return a, a.packages.Init()
+}
+
+// installBrowsedPackages installs the cart into the current project with the
+// package manager its lockfile points to.
+func (a App) installBrowsedPackages() (App, tea.Cmd) {
+	cart := a.packages.SelectedPackages()
+	if len(cart) == 0 {
+		a.browseMode = false
+		a.screen = ScreenWelcome
+		return a, nil
+	}
+
+	pm := packagemanager.DetectFromLockfile(a.selectedDir)
+	if pm == packagemanager.None {
+		pm = a.defaultPM
+	}
+	steps := scaffold.InstallPlan(a.selectedDir, a.selectedFramework, cart, pm)
+	a.screen = ScreenExec
+	a.exec = screens.NewInstallExec(a.width, a.height, toExecSteps(steps))
+	return a, a.exec.Init()
+}
+
+func toExecSteps(steps []scaffold.Step) []screens.ExecStep {
+	execSteps := make([]screens.ExecStep, len(steps))
+	for i, s := range steps {
+		execSteps[i] = screens.ExecStep{Label: s.Label, Cmd: s.Cmd, Fn: s.Fn, StreamFn: s.StreamFn}
+	}
+	return execSteps
+}
 
 func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 	switch eco {
