@@ -651,3 +651,10 @@ func TestFrameworkSteps_ViteTemplateFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestPlan_JSWithoutPackageManager_DefaultsToNpm(t *testing.T) {
+	steps := Plan("/tmp/x/app", jsfw("nestjs"), nil, screens.GitConfig{}, packagemanager.None)
+	if want := "npx @nestjs/cli@latest new app --package-manager npm"; steps[0].Label != want {
+		t.Errorf("label = %q, want %q", steps[0].Label, want)
+	}
+}

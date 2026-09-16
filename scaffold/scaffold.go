@@ -34,6 +34,10 @@ func Plan(
 ) []Step {
 	var steps []Step
 
+	if fw.Ecosystem == "js" && pm == packagemanager.None {
+		pm = packagemanager.NPM
+	}
+
 	steps = append(steps, frameworkSteps(targetDir, fw, pm)...)
 
 	if len(selectedPkgs) > 0 {

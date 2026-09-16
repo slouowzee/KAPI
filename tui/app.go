@@ -55,6 +55,10 @@ type App struct {
 	selectedPM        packagemanager.PM
 	selectedGit       screens.GitConfig
 
+	// defaultPM is the package manager saved in the config; it preselects the
+	// package manager screen whenever no choice has been made yet.
+	defaultPM packagemanager.PM
+
 	cdDir      string
 	browseMode bool
 	editMode   bool
@@ -65,10 +69,12 @@ func New() App {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
 	}
+	defaultPM := packagemanager.Parse(cfg.PackageManager)
 	return App{
 		screen:     ScreenWelcome,
 		welcome:    screens.NewWelcome(0, 0),
-		selectedPM: packagemanager.Parse(cfg.PackageManager),
+		selectedPM: defaultPM,
+		defaultPM:  defaultPM,
 	}
 }
 
@@ -334,9 +340,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if a.selectedFramework.Ecosystem == "js" {
-				a.screen = ScreenPMSelect
-				a.pmSelect = screens.NewPMSelect(a.width, a.height, a.selectedPM)
-				return a, a.pmSelect.Init()
+				return a.goToPMSelect()
 			}
 			return a.goToRecap()
 		}
@@ -399,9 +403,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.screen = ScreenGit
 			case screens.RECAP_SECTION_PM:
 				if a.selectedFramework.Ecosystem == "js" {
-					a.pmSelect = screens.NewPMSelect(a.width, a.height, a.selectedPM)
-					a.screen = ScreenPMSelect
-					return a, a.pmSelect.Init()
+					return a.goToPMSelect()
 				} else {
 					a.git = screens.Git(a.width, a.height, a.selectedDir, a.selectedGit)
 					a.screen = ScreenGit
@@ -441,6 +443,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.settings.ConsumeBack()
 			if updated.CurrentPM() != packagemanager.None {
 				a.selectedPM = updated.CurrentPM()
+				a.defaultPM = updated.CurrentPM()
 			}
 			a.screen = ScreenWelcome
 			return a, nil
@@ -511,8 +514,23 @@ func (a App) View() string {
 	return ""
 }
 
+func (a App) goToPMSelect() (App, tea.Cmd) {
+	preselected := a.selectedPM
+	if preselected == packagemanager.None {
+		preselected = a.defaultPM
+	}
+	a.screen = ScreenPMSelect
+	a.pmSelect = screens.NewPMSelect(a.width, a.height, preselected)
+	return a, a.pmSelect.Init()
+}
+
 func (a App) goToRecap() (App, tea.Cmd) {
 	a.selectedPackages = a.packages.SelectedPackages()
+	// NOTE: switching to a JS framework from the summary resets the package
+	// manager, which must be chosen again before scaffolding.
+	if a.selectedFramework.Ecosystem == "js" && a.selectedPM == packagemanager.None {
+		return a.goToPMSelect()
+	}
 	a.screen = ScreenRecap
 	a.recap = screens.NewRecap(a.width, a.height, screens.RecapSummary{
 		Dir:       a.selectedDir,
