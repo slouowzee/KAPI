@@ -66,6 +66,7 @@ func newDetectedGitModel() GitModel {
 		height:    24,
 		targetDir: "/home/user/myproject",
 		detecting: false,
+		initOpt:   gitInitYes,
 	}
 }
 
@@ -379,5 +380,22 @@ func TestGitModelConfig_DetectedRemote_IsExisting(t *testing.T) {
 	}
 	if cfg.RemoteURL != "git@github.com:me/existing.git" {
 		t.Errorf("RemoteURL = %q, want the detected origin", cfg.RemoteURL)
+	}
+}
+
+func TestGitModel_NoRepo_DisablesRemote(t *testing.T) {
+	m := newDetectedGitModel()
+	m.initOpt = gitInitNo
+	m.remoteOpt = gitRemoteGithubPublic
+	m.repoNameInput = "repo"
+
+	if cfg := m.Config(); cfg.RemoteHost != "" || cfg.RepoName != "" {
+		t.Errorf("remote must be ignored without a local repo, got host=%q repo=%q", cfg.RemoteHost, cfg.RepoName)
+	}
+
+	m.cursor = gitFieldInit
+	m.moveCursor(1)
+	if m.cursor != gitFieldCollab {
+		t.Errorf("cursor = %d, want gitFieldCollab (%d) when remote is unavailable", m.cursor, gitFieldCollab)
 	}
 }

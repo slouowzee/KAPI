@@ -226,6 +226,9 @@ func (m GitModel) Config() GitConfig {
 	default:
 		cfg.CI = ciChoiceNone
 	}
+	if !m.hasRepo() {
+		return cfg
+	}
 	if m.hasGit && m.detectedURL != "" {
 		cfg.RemoteURL = m.detectedURL
 		cfg.RemoteHost = inferRemoteHost(m.detectedURL)
@@ -246,6 +249,12 @@ func (m GitModel) Config() GitConfig {
 		}
 	}
 	return cfg
+}
+
+// hasRepo reports whether a git repository will exist after scaffolding;
+// remotes cannot be configured without one.
+func (m GitModel) hasRepo() bool {
+	return m.hasGit || m.initOpt == gitInitYes
 }
 
 func (m GitModel) Done() bool        { return m.done }
@@ -320,6 +329,10 @@ func (m *GitModel) moveCursor(delta int) {
 	next := m.cursor + delta
 	for {
 		if (next == gitFieldIgnore || next == gitFieldCommit) && m.initOpt == gitInitNo {
+			next += delta
+			continue
+		}
+		if (next == gitFieldRemote || next == gitFieldRepoName || next == gitFieldURL) && !m.hasRepo() {
 			next += delta
 			continue
 		}
@@ -496,19 +509,20 @@ func (m GitModel) View() string {
 		}
 	}
 
-	if m.hasGit && m.detectedURL != "" {
+	switch {
+	case !m.hasRepo():
+		sb.WriteString(m.renderLockedRow("Remote", "requires a local repo"))
+	case m.hasGit && m.detectedURL != "":
 		sb.WriteString(m.renderLockedRow("Remote", m.detectedURL))
-	} else {
+	default:
 		opts := []string{"Skip", "GitHub private", "GitHub public", "Existing URL"}
 		sb.WriteString(m.renderRow(gitFieldRemote, "Remote", opts, m.remoteOpt))
-	}
-
-	if (m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic) && (!m.hasGit || m.detectedURL == "") {
-		sb.WriteString(m.renderRepoNameRow())
-	}
-
-	if m.remoteOpt == gitRemoteExisting && (!m.hasGit || m.detectedURL == "") {
-		sb.WriteString(m.renderURLRow())
+		if m.remoteOpt == gitRemoteGithubPrivate || m.remoteOpt == gitRemoteGithubPublic {
+			sb.WriteString(m.renderRepoNameRow())
+		}
+		if m.remoteOpt == gitRemoteExisting {
+			sb.WriteString(m.renderURLRow())
+		}
 	}
 
 	collabOpts := []string{"No", "Yes"}

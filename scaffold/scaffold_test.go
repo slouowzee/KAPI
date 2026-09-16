@@ -86,7 +86,7 @@ func TestRemoteSteps_Github_PublicLabel(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_ReturnsThreeSteps(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "github", RepoName: "repo"}
+	cfg := screens.GitConfig{RemoteHost: "github", RepoName: "repo", InitialCommit: true}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if len(steps) != 3 {
@@ -96,8 +96,9 @@ func TestRemoteSteps_Github_ReturnsThreeSteps(t *testing.T) {
 
 func TestRemoteSteps_ExistingURL_ReturnsTwoSteps(t *testing.T) {
 	cfg := screens.GitConfig{
-		RemoteHost: "custom",
-		RemoteURL:  "git@mygit.internal:user/repo.git",
+		RemoteHost:    "custom",
+		RemoteURL:     "git@mygit.internal:user/repo.git",
+		InitialCommit: true,
 	}
 	steps := remoteSteps("/tmp/proj", cfg)
 
@@ -375,6 +376,79 @@ func TestRemoteSteps_ExistingRemote_ReturnsNil(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if steps := remoteSteps("/tmp/proj", tt.cfg); steps != nil {
 				t.Errorf("expected no remote steps for an existing origin, got %d", len(steps))
+			}
+		})
+	}
+}
+
+func stepLabels(steps []Step) []string {
+	labels := make([]string, len(steps))
+	for i, s := range steps {
+		labels[i] = s.Label
+	}
+	return labels
+}
+
+func hasLabel(steps []Step, prefix string) bool {
+	for _, l := range stepLabels(steps) {
+		if strings.HasPrefix(l, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPlan_GitSteps(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       screens.GitConfig
+		wantInit  bool
+		wantDev   bool
+		wantPush  bool
+		wantRepo  bool
+		wantFiles bool
+	}{
+		{
+			name:     "init without initial commit",
+			cfg:      screens.GitConfig{InitLocal: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
+			wantInit: true, wantRepo: false, wantPush: false,
+		},
+		{
+			name:     "init with initial commit pushes",
+			cfg:      screens.GitConfig{InitLocal: true, InitialCommit: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
+			wantInit: true, wantPush: true,
+		},
+		{
+			name:      "no repo skips remote and dev branch",
+			cfg:       screens.GitConfig{Collab: true, RemoteHost: "github", RepoName: "app"},
+			wantFiles: true,
+		},
+		{
+			name:      "collab with repo creates dev branch",
+			cfg:       screens.GitConfig{InitLocal: true, InitialCommit: true, Collab: true},
+			wantInit:  true,
+			wantDev:   true,
+			wantFiles: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			steps := Plan("/tmp/x/app", fw("laravel"), nil, tt.cfg, packagemanager.None)
+			if got := hasLabel(steps, "git init"); got != tt.wantInit {
+				t.Errorf("git init present = %v, want %v (%v)", got, tt.wantInit, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "create dev branch"); got != tt.wantDev {
+				t.Errorf("dev branch present = %v, want %v (%v)", got, tt.wantDev, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "git push"); got != tt.wantPush {
+				t.Errorf("push present = %v, want %v (%v)", got, tt.wantPush, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "create public GitHub repo") || hasLabel(steps, "create private GitHub repo"); got != tt.wantRepo {
+				t.Errorf("github repo creation present = %v, want %v (%v)", got, tt.wantRepo, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "write CONTRIBUTING.md"); got != tt.wantFiles {
+				t.Errorf("collab files present = %v, want %v (%v)", got, tt.wantFiles, stepLabels(steps))
 			}
 		})
 	}

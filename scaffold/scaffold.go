@@ -40,24 +40,26 @@ func Plan(
 		steps = append(steps, packageSteps(targetDir, fw, selectedPkgs, pm)...)
 	}
 
+	hasRepo := gitCfg.InitLocal || gitCfg.HasExistingGit
+
 	if gitCfg.InitLocal && !gitCfg.HasExistingGit {
-		if gitCfg.InitialCommit {
+		steps = append(steps, Step{
+			Label:    "git init",
+			StreamFn: streamCmd(targetDir, "git", "init"),
+		})
+		if gitCfg.UniversalGitignore {
 			steps = append(steps, Step{
-				Label:    "git init",
-				StreamFn: streamCmd(targetDir, "git", "init"),
+				Label: "write universal .gitignore",
+				Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
 			})
-			if gitCfg.UniversalGitignore {
-				steps = append(steps, Step{
-					Label: "write universal .gitignore",
-					Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
-				})
-			}
+		}
+		if gitCfg.InitialCommit {
 			steps = append(steps, initialCommitStep(targetDir))
 		}
 	}
 
 	if gitCfg.Collab {
-		steps = append(steps, collabSteps(targetDir)...)
+		steps = append(steps, collabSteps(targetDir, hasRepo)...)
 	}
 
 	switch gitCfg.CI {
@@ -67,7 +69,9 @@ func Plan(
 		steps = append(steps, ciGitlabStep(targetDir, fw, pm))
 	}
 
-	steps = append(steps, remoteSteps(targetDir, gitCfg)...)
+	if hasRepo {
+		steps = append(steps, remoteSteps(targetDir, gitCfg)...)
+	}
 
 	return steps
 }
@@ -76,6 +80,9 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 	if gitCfg.HasExistingRemote {
 		return nil
 	}
+	// NOTE: a freshly initialised repository without a commit has nothing to
+	// push, so the remote is only registered.
+	hasCommit := gitCfg.InitialCommit || gitCfg.HasExistingGit
 	switch gitCfg.RemoteHost {
 	case "github":
 		name := gitCfg.RepoName
@@ -90,7 +97,7 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 			visibility = "private"
 		}
 
-		return []Step{
+		steps := []Step{
 			{
 				Label: "create " + visibility + " GitHub repo: " + name,
 				Fn: func() error {
@@ -110,26 +117,33 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 					return gitSilentCmd(targetDir, "remote", "add", "origin", *sshURL).Run()
 				},
 			},
-			{
-				Label:    "git push -u origin HEAD",
-				StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "HEAD"),
-			},
 		}
+		if hasCommit {
+			steps = append(steps, pushStep(targetDir))
+		}
+		return steps
 
 	default:
 		if gitCfg.RemoteURL == "" {
 			return nil
 		}
-		return []Step{
+		steps := []Step{
 			{
 				Label:    "git remote add origin " + gitCfg.RemoteURL,
 				StreamFn: streamGitCmd(targetDir, "remote", "add", "origin", gitCfg.RemoteURL),
 			},
-			{
-				Label:    "git push -u origin HEAD",
-				StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "HEAD"),
-			},
 		}
+		if hasCommit {
+			steps = append(steps, pushStep(targetDir))
+		}
+		return steps
+	}
+}
+
+func pushStep(targetDir string) Step {
+	return Step{
+		Label:    "git push -u origin HEAD",
+		StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "HEAD"),
 	}
 }
 
@@ -340,12 +354,15 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 	return steps
 }
 
-func collabSteps(targetDir string) []Step {
-	return []Step{
-		{
+func collabSteps(targetDir string, hasRepo bool) []Step {
+	var steps []Step
+	if hasRepo {
+		steps = append(steps, Step{
 			Label:    "create dev branch",
 			StreamFn: streamGitCmd(targetDir, "checkout", "-b", "dev"),
-		},
+		})
+	}
+	return append(steps, []Step{
 		{
 			Label: "write CONTRIBUTING.md",
 			Fn:    writeFileFn(targetDir, "CONTRIBUTING.md", contributingMd),
@@ -362,7 +379,7 @@ func collabSteps(targetDir string) []Step {
 			Label: "write .github/ISSUE_TEMPLATE/feature_request.md",
 			Fn:    writeFileFn(targetDir, filepath.Join(".github", "ISSUE_TEMPLATE", "feature_request.md"), featureTemplate),
 		},
-	}
+	}...)
 }
 
 func ciGithubStep(targetDir string, fw registry.Framework, pm packagemanager.PM) Step {
