@@ -370,7 +370,22 @@ func (m PackagesModel) frozenPackagesList() []frozenViewEntry {
 			})
 		}
 	}
+	// NOTE: part of the list comes from a map; sorting keeps the order, and
+	// therefore what the cursor points at, identical between renders.
+	slices.SortFunc(entries, func(a, b frozenViewEntry) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	return entries
+}
+
+// currentFrozenEntry returns the entry under the cursor in the frozen view,
+// using the same filtered list as the one rendered.
+func (m PackagesModel) currentFrozenEntry() (frozenViewEntry, bool) {
+	entries := m.getFilteredFrozen()
+	if m.freezeViewCursor < 0 || m.freezeViewCursor >= len(entries) {
+		return frozenViewEntry{}, false
+	}
+	return entries[m.freezeViewCursor], true
 }
 
 type favoriteSavedMsg struct {
@@ -535,9 +550,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 
 		case "ctrl+g":
 			if m.inFreezeView {
-				frozenEntries := m.frozenPackagesList()
-				if len(frozenEntries) > 0 && m.freezeViewCursor < len(frozenEntries) {
-					entry := frozenEntries[m.freezeViewCursor]
+				if entry, ok := m.currentFrozenEntry(); ok {
 					m.freezeStatus = "Unfreezing " + entry.Name + "..."
 					m.inFreezeView = false
 					return m, unfreezeTuiCmd(entry.Name)
@@ -628,9 +641,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 			m.done = true
 		case " ":
 			if m.inFreezeView {
-				frozenEntries := m.frozenPackagesList()
-				if len(frozenEntries) > 0 && m.freezeViewCursor < len(frozenEntries) {
-					entry := frozenEntries[m.freezeViewCursor]
+				if entry, ok := m.currentFrozenEntry(); ok {
 					name := entry.Name
 					desc := entry.Description
 					pkg := packages.Package{Name: name, Description: desc}
@@ -668,9 +679,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 			}
 		case "ctrl+f":
 			if m.inFreezeView {
-				frozenEntries := m.frozenPackagesList()
-				if len(frozenEntries) > 0 && m.freezeViewCursor < len(frozenEntries) {
-					entry := frozenEntries[m.freezeViewCursor]
+				if entry, ok := m.currentFrozenEntry(); ok {
 					if m.isFavorite(entry.Name) {
 						m.freezeStatus = "Unfavorited " + entry.Name
 					} else {
@@ -770,7 +779,7 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 				return m, debounceCmd(m.query)
 			}
 			if m.inFreezeView {
-				frozenEntries := m.frozenPackagesList()
+				frozenEntries := m.getFilteredFrozen()
 				if m.freezeViewCursor < len(frozenEntries)-1 {
 					m.freezeViewCursor++
 				}
@@ -861,6 +870,12 @@ func (m PackagesModel) Update(msg tea.Msg) (PackagesModel, tea.Cmd) {
 					return m, debounceCmd(m.query)
 				}
 			}
+		}
+	}
+
+	if m.inFreezeView {
+		if n := len(m.getFilteredFrozen()); m.freezeViewCursor >= n {
+			m.freezeViewCursor = max(n-1, 0)
 		}
 	}
 
@@ -1199,9 +1214,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 	}
 
 	if m.inFreezeView {
-		entries := m.frozenPackagesList()
-		if len(entries) > 0 && m.freezeViewCursor < len(entries) {
-			entry := entries[m.freezeViewCursor]
+		if entry, ok := m.currentFrozenEntry(); ok {
 			pkg := m.findPackageByName(entry.Name)
 			if pkg != nil {
 				sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")

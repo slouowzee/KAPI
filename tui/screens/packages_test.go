@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
@@ -81,5 +82,52 @@ func TestToggleFavorite_UnreadableConfigIsKept(t *testing.T) {
 	updated, _ := m.Update(msg)
 	if updated.freezeStatus == "" {
 		t.Error("the save error should be shown to the user")
+	}
+}
+
+func newFrozenViewModel(names ...string) PackagesModel {
+	m := PackagesModel{
+		framework:    registry.Framework{ID: "nextjs"},
+		inFreezeView: true,
+		freezeData:   make(map[string]config.FreezeVersionPackage),
+	}
+	for _, n := range names {
+		m.freezeData[n] = config.FreezeVersionPackage{Name: n, Version: "1.0.0"}
+	}
+	return m
+}
+
+func TestFrozenPackagesList_IsSorted(t *testing.T) {
+	m := newFrozenViewModel("zod", "axios", "react", "motion", "dayjs", "clsx")
+	for i := 0; i < 20; i++ {
+		entries := m.frozenPackagesList()
+		for j := 1; j < len(entries); j++ {
+			if entries[j-1].Name > entries[j].Name {
+				t.Fatalf("entries not sorted: %v before %v", entries[j-1].Name, entries[j].Name)
+			}
+		}
+	}
+}
+
+func TestFrozenView_ActsOnFilteredEntry(t *testing.T) {
+	m := newFrozenViewModel("axios", "react", "zod")
+	m.query = "zo"
+	m.freezeViewCursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+
+	if len(updated.cart) != 1 || updated.cart[0].Name != "zod" {
+		t.Errorf("cart = %+v, want the filtered entry zod", updated.cart)
+	}
+}
+
+func TestFrozenView_CursorClampedToFilteredList(t *testing.T) {
+	m := newFrozenViewModel("axios", "react", "zod")
+	m.freezeViewCursor = 2
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+
+	if n := len(updated.getFilteredFrozen()); updated.freezeViewCursor >= n {
+		t.Errorf("cursor %d out of range for %d filtered entries", updated.freezeViewCursor, n)
 	}
 }
