@@ -78,7 +78,7 @@ func handleConfigGet(key string) {
 		if cfg.GithubToken == "" {
 			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + styles.DimStyle.Render("(not set)"))
 		} else {
-			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + maskToken(cfg.GithubToken))
+			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + MaskToken(cfg.GithubToken))
 		}
 	case "package.manager":
 		if cfg.PackageManager == "" {
@@ -92,7 +92,8 @@ func handleConfigGet(key string) {
 	}
 }
 
-func maskToken(tok string) string {
+// MaskToken hides a secret while keeping enough of it to recognise it.
+func MaskToken(tok string) string {
 	const show = 7
 	const tail = 4
 	if len(tok) <= show+tail {

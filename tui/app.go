@@ -132,6 +132,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.screen == ScreenGitConfig && a.gitConfig.IsInputMode() {
 				break
 			}
+			if a.screen == ScreenSettings && a.settings.IsInputMode() {
+				break
+			}
 			if a.screen == ScreenFramework || a.screen == ScreenPackages {
 				break
 			}
