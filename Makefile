@@ -1,6 +1,8 @@
 .PHONY: help build test lint clean check
 
 APP_NAME := kapi
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
+LDFLAGS := -X github.com/slouowzee/kapi/internal/updater.version=$(VERSION)
 
 help: ## Show this help message
 	@echo "Usage: make [target]"
@@ -9,7 +11,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the KAPI binary
-	go build -o $(APP_NAME) main.go
+	go build -ldflags "$(LDFLAGS)" -o $(APP_NAME) main.go
 
 test: ## Run unit tests with race detector
 	@echo "Running tests..."

@@ -19,6 +19,8 @@ builds:
         goarch: arm64
     main: ./main.go
     binary: kapi
+    ldflags:
+      - -s -w -X github.com/slouowzee/kapi/internal/updater.version={{ .Tag }}
 
 archives:
   - formats:
