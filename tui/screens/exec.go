@@ -327,10 +327,10 @@ func (m ExecModel) View() string {
 					optStr.WriteString(styles.DimStyle.Render(opt))
 				}
 			}
-				fmt.Fprintf(&sb, "%s%s\n", 
-					styles.CursorStyle.Render("  ❯❯"), 
-					styles.SelectedStyle.Render("  ")+optStr.String(), 
-				)
+			fmt.Fprintf(&sb, "%s%s\n",
+				styles.CursorStyle.Render("  ❯❯"),
+				styles.SelectedStyle.Render("  ")+optStr.String(),
+			)
 			sb.WriteString("\n")
 			sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm") + "\n")
 		} else {

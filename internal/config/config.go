@@ -99,10 +99,10 @@ func CheckGitHubScopeError(resp *http.Response) error {
 }
 
 type Config struct {
-	GithubToken    string                       `json:"github_token,omitempty"`
-	PackageManager string                       `json:"package_manager,omitempty"`
-	Favorites      map[string][]FavoritePackage `json:"favorites,omitempty"`
-	FreezeVersionPackages map[string][]FreezeVersionPackage   `json:"freeze_version_packages,omitempty"`
+	GithubToken           string                            `json:"github_token,omitempty"`
+	PackageManager        string                            `json:"package_manager,omitempty"`
+	Favorites             map[string][]FavoritePackage      `json:"favorites,omitempty"`
+	FreezeVersionPackages map[string][]FreezeVersionPackage `json:"freeze_version_packages,omitempty"`
 }
 
 type FavoritePackage struct {

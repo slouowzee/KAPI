@@ -39,13 +39,13 @@ const searchLimitNpm = 250
 const searchLimitPackagist = 100
 
 type Package struct {
-	Name           string
-	Description    string
-	Versions       []string
-	PinnedVersion  string
-	Weekly         int64
-	Stars          int64
-	GithubRepo     string
+	Name          string
+	Description   string
+	Versions      []string
+	PinnedVersion string
+	Weekly        int64
+	Stars         int64
+	GithubRepo    string
 }
 
 var githubRepoRe = regexp.MustCompile(`github\.com[/:]([^/]+/[^/.\s]+?)(?:\.git)?$`)
@@ -84,8 +84,8 @@ func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
 	defer func() { _ = resp.Body.Close() }()
 
 	var meta struct {
-		Description string                       `json:"description"`
-		Versions    map[string]json.RawMessage   `json:"versions"`
+		Description string                     `json:"description"`
+		Versions    map[string]json.RawMessage `json:"versions"`
 		Repository  struct {
 			URL string `json:"url"`
 		} `json:"repository"`

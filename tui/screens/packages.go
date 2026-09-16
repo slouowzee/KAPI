@@ -3,8 +3,8 @@ package screens
 import (
 	"context"
 	"fmt"
-	"strings"
 	"github.com/slouowzee/kapi/internal/config"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -183,12 +183,12 @@ type PackagesModel struct {
 	backPressed   bool
 	backCancelled bool
 
-	savedCart      []packages.Package
-	freezeData     map[string]config.FreezeVersionPackage
-	freezeStatus   string
+	savedCart    []packages.Package
+	freezeData   map[string]config.FreezeVersionPackage
+	freezeStatus string
 
 	// Freeze view
-	inFreezeView    bool
+	inFreezeView     bool
 	freezeViewCursor int
 
 	// Version selection
@@ -214,7 +214,7 @@ func NewPackages(width, height int, framework registry.Framework, targetDir stri
 		initialPrompt:   true,
 		loadingDefaults: true,
 		favorites:       []packages.Package{},
-		freezeData:  freezeData,
+		freezeData:      freezeData,
 	}
 }
 
@@ -234,7 +234,7 @@ func NewPackagesFromCart(width, height int, framework registry.Framework, target
 		favorites:       []packages.Package{},
 		cart:            append([]packages.Package{}, cart...),
 		savedCart:       saved,
-		freezeData:  freezeData,
+		freezeData:      freezeData,
 	}
 }
 
@@ -266,7 +266,6 @@ func (m PackagesModel) IsBackCancelled() bool                { return m.backCanc
 func (m *PackagesModel) ConsumeBack()          { m.backPressed = false }
 func (m *PackagesModel) ConsumeBackCancelled() { m.backCancelled = false }
 func (m *PackagesModel) ConsumeDone()          { m.done = false }
-
 
 func (m PackagesModel) getFilteredFavorites() []packages.Package {
 	if m.query == "" {
@@ -938,7 +937,7 @@ func (m PackagesModel) View() string {
 	sb.WriteString(styles.MutedStyle.Render(hints) + "\n")
 
 	if m.freezeStatus != "" {
-		sb.WriteString(styles.SubtitleStyle.Render("  " + m.freezeStatus) + "\n")
+		sb.WriteString(styles.SubtitleStyle.Render("  "+m.freezeStatus) + "\n")
 	}
 
 	return sb.String()
@@ -1038,7 +1037,7 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 		if windowEnd > total {
 			windowEnd = total
 		}
-		
+
 		for i, pkg := range favs[windowStart:windowEnd] {
 			absIdx := windowStart + i
 			inCart := m.isInCart(pkg.Name)
@@ -1049,7 +1048,7 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 			} else {
 				checkbox = styles.DimStyle.Render("[ ]")
 			}
-			
+
 			favIcon := styles.SelectedStyle.Render(" ★")
 
 			frozenBadge := ""
@@ -1130,7 +1129,7 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 		} else {
 			checkbox = styles.DimStyle.Render("[ ]")
 		}
-		
+
 		isFav := m.isFavorite(pkg.Name)
 		var favIcon string
 		if isFav {
@@ -1139,12 +1138,12 @@ func (m PackagesModel) renderList(visible, listWidth int) string {
 			favIcon = "  "
 		}
 
-			frozenBadge := ""
-			if _, ok := m.freezeData[pkg.Name]; ok {
-				frozenBadge = styles.MutedStyle.Render(" ❄")
-			}
+		frozenBadge := ""
+		if _, ok := m.freezeData[pkg.Name]; ok {
+			frozenBadge = styles.MutedStyle.Render(" ❄")
+		}
 
-			if absIdx == m.cursor {
+		if absIdx == m.cursor {
 			var cur string
 			if m.inCartMode || m.inFavoritesMode {
 				cur = styles.DimStyle.Render(" ❯❯")
@@ -1172,7 +1171,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 	var sb strings.Builder
 
 	if m.selectVersion {
-		sb.WriteString(styles.TitleStyle.Render("Select version for " + m.freezeTargetName) + "\n")
+		sb.WriteString(styles.TitleStyle.Render("Select version for "+m.freezeTargetName) + "\n")
 		sb.WriteString("\n")
 		total := len(m.versionList)
 		visible := 12
@@ -1320,7 +1319,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 	} else {
 		cartLabel = styles.MutedStyle.Render(cartLabel)
 	}
-	
+
 	sb.WriteString(cartLabel + "\n")
 
 	if len(m.cart) == 0 {
@@ -1338,7 +1337,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 			absIdx := windowStart + i
 			if m.inCartMode && absIdx == m.cartCursor {
 				cur := styles.CursorStyle.Render("❯")
-				fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render("· " + p.Name))
+				fmt.Fprintf(&sb, "%s %s\n", cur, styles.SelectedStyle.Render("· "+p.Name))
 			} else {
 				sb.WriteString(styles.SelectedStyle.Render("  · ") + styles.DimStyle.Render(p.Name) + "\n")
 			}

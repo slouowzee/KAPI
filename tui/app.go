@@ -536,4 +536,3 @@ func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 		return registry.Framework{ID: "vanilla-vite", Name: "project", Ecosystem: "js"}
 	}
 }
-
