@@ -2,13 +2,18 @@
 
 package scaffold
 
-import "os/exec"
+import (
+	"os/exec"
+	"strconv"
+)
 
-// configureCancel keeps the default behaviour on Windows, where
-// exec.CommandContext kills the process on cancellation.
-func configureCancel(*exec.Cmd) {}
+// configureCancel stops the whole process tree on cancellation: npm and
+// composer run through .cmd wrappers whose children would otherwise survive.
+func configureCancel(c *exec.Cmd) {
+	c.Cancel = func() error { return terminateTree(c) }
+}
 
-// terminateTree kills a started command.
+// terminateTree kills a started command and all its descendants.
 func terminateTree(c *exec.Cmd) error {
-	return c.Process.Kill()
+	return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(c.Process.Pid)).Run()
 }
