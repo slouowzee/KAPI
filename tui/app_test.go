@@ -89,3 +89,28 @@ func TestBrowse_InstallCartIntoCurrentProject(t *testing.T) {
 		t.Errorf("install should use the lockfile package manager, view:\n%s", view)
 	}
 }
+
+func TestBrowse_UsesDetectedFramework(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tests := []struct {
+		name     string
+		manifest string
+		wantID   string
+	}{
+		{name: "detected next app", manifest: `{"dependencies":{"next":"15"}}`, wantID: "nextjs"},
+		{name: "unknown project falls back", manifest: `{"dependencies":{"lodash":"4"}}`, wantID: "vanilla-vite"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(tt.manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			a := App{browseMode: true, selectedDir: dir}
+			a, _ = a.startBrowse(ecosystem.ECOSYSTEM_JS)
+			if a.selectedFramework.ID != tt.wantID {
+				t.Errorf("framework = %q, want %q", a.selectedFramework.ID, tt.wantID)
+			}
+		})
+	}
+}

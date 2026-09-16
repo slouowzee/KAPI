@@ -569,6 +569,10 @@ func (a App) ConfigError() error { return a.configErr }
 
 func (a App) startBrowse(eco ecosystem.Ecosystem) (App, tea.Cmd) {
 	fw := browseFallbackFramework(eco)
+	// NOTE: using the real framework keeps its favorites and suggestions.
+	if detected, ok := registry.DetectProjectFramework(a.selectedDir, fw.Ecosystem); ok {
+		fw = detected
+	}
 	a.selectedFramework = fw
 	a.screen = ScreenPackages
 	a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir)
