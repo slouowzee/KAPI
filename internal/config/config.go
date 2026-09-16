@@ -22,11 +22,15 @@ func GithubToken() string {
 	if cfg, err := Load(); err == nil && cfg.GithubToken != "" {
 		return cfg.GithubToken
 	}
-	if tok := ghAuthToken(); tok != "" {
+	if tok := ghTokenLookup(); tok != "" {
 		return tok
 	}
 	return ""
 }
+
+// ghTokenLookup is a variable so tests never pick up the developer's real
+// gh CLI session.
+var ghTokenLookup = ghAuthToken
 
 func ghAuthToken() string {
 	path, err := exec.LookPath("gh")

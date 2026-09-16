@@ -32,6 +32,9 @@ func setupTempHome(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	orig := ghTokenLookup
+	ghTokenLookup = func() string { return "" }
+	t.Cleanup(func() { ghTokenLookup = orig })
 	return tmp
 }
 
@@ -488,5 +491,15 @@ func TestConfig_SetAndRemoveFrozen(t *testing.T) {
 	}
 	if got := cfg.FreezeVersionPackages["npm"]; len(got) != 1 || got[0].Name != "react" {
 		t.Errorf("npm registry = %+v, want only react", got)
+	}
+}
+
+func TestGithubToken_FallsBackToGhCLI(t *testing.T) {
+	setupTempHome(t)
+	t.Setenv("GITHUB_TOKEN", "")
+	ghTokenLookup = func() string { return "gh-token" }
+
+	if got := GithubToken(); got != "gh-token" {
+		t.Errorf("GithubToken() = %q, want gh-token", got)
 	}
 }
