@@ -684,3 +684,28 @@ func TestStreamCmd_CancelStopsChildProcesses(t *testing.T) {
 		t.Fatal("command did not stop after cancellation")
 	}
 }
+
+func TestMkdirSteps_CreateDirectoriesNatively(t *testing.T) {
+	tests := []struct {
+		name string
+		fw   registry.Framework
+	}{
+		{name: "unknown framework", fw: registry.Framework{ID: "unknown", Ecosystem: "js"}},
+		{name: "vanilla php", fw: fw("vanilla-php")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "nested", "app")
+			step := frameworkSteps(dir, tt.fw, packagemanager.NPM)[0]
+			if step.Fn == nil || step.StreamFn != nil || step.Cmd != nil {
+				t.Fatal("mkdir must run in-process, not through an external command")
+			}
+			if err := step.Fn(); err != nil {
+				t.Fatalf("mkdir step: %v", err)
+			}
+			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+				t.Errorf("directory %s was not created", dir)
+			}
+		})
+	}
+}

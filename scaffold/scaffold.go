@@ -246,7 +246,7 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			StreamFn: streamCmd(parent, "composer", "create-project", "api-platform/api-platform", name),
 		}}
 	case "vanilla-php":
-		return vanillaPhpSteps(targetDir, name, parent)
+		return vanillaPhpSteps(targetDir, name)
 
 	case "nextjs":
 		// NOTE: the flag keeps the chosen package manager when the initializer
@@ -290,10 +290,15 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 	default:
 	}
 
-	return []Step{{
-		Label:    "mkdir " + targetDir,
-		StreamFn: streamCmd("", "mkdir", "-p", targetDir),
-	}}
+	return []Step{mkdirStep(targetDir)}
+}
+
+// mkdirStep creates a directory natively: `mkdir -p` does not exist on Windows.
+func mkdirStep(dir string) Step {
+	return Step{
+		Label: "mkdir " + dir,
+		Fn:    func() error { return os.MkdirAll(dir, 0o755) },
+	}
 }
 
 // viteArgs builds create-vite arguments. Only npm needs the extra `--` to
@@ -345,12 +350,9 @@ func vanillaPhpComposerName(folder string) string {
 	return part + "/" + part
 }
 
-func vanillaPhpSteps(targetDir, name, parent string) []Step {
+func vanillaPhpSteps(targetDir, name string) []Step {
 	return []Step{
-		{
-			Label:    "mkdir " + name,
-			StreamFn: streamCmd(parent, "mkdir", "-p", name),
-		},
+		mkdirStep(targetDir),
 		{
 			Label:    "composer init (in " + name + ")",
 			StreamFn: streamCmd(targetDir, "composer", "init", "--no-interaction", "--name="+vanillaPhpComposerName(name)),
