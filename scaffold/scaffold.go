@@ -822,9 +822,13 @@ jobs:
 		return header
 	default:
 		return header +
-			"      - run: composer test\n"
+			"      - run: " + composerTestIfPresent + "\n"
 	}
 }
+
+// composerTestIfPresent runs `composer test` only when the skeleton defines
+// that script; several skeletons (Drupal, Yii…) ship without one.
+const composerTestIfPresent = `if composer run-script --list | grep -qE '^[[:space:]]+test([[:space:]]|$)'; then composer test; else echo "No composer test script, skipping"; fi`
 
 func gitlabCI(fw registry.Framework, pm packagemanager.PM) string {
 	if fw.Ecosystem == "php" {
@@ -896,6 +900,6 @@ test:
 	default:
 		return header +
 			"  script:\n" +
-			"    - composer test\n"
+			"    - " + composerTestIfPresent + "\n"
 	}
 }

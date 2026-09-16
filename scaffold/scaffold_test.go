@@ -275,8 +275,11 @@ func TestGithubActionsCI_VanillaPhp_NoTestStep(t *testing.T) {
 func TestGithubActionsCI_GenericPhp_ComposerTest(t *testing.T) {
 	for _, id := range []string{"slim", "yii", "cakephp", "laminas", "drupal", "phalcon", "fuelphp", "leafphp"} {
 		out := githubActionsCI(fw(id), packagemanager.NPM)
-		if !strings.Contains(out, "composer test") {
-			t.Errorf("%s CI should contain 'composer test'", id)
+		if !strings.Contains(out, composerTestIfPresent) {
+			t.Errorf("%s CI should only run 'composer test' when the script exists", id)
+		}
+		if gl := gitlabCI(fw(id), packagemanager.NPM); !strings.Contains(gl, composerTestIfPresent) {
+			t.Errorf("%s gitlab CI should only run 'composer test' when the script exists", id)
 		}
 		if strings.Contains(out, ".env.example") {
 			t.Errorf("%s CI must not reference .env.example", id)
