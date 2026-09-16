@@ -27,6 +27,11 @@ type execStreamStartMsg struct{ ch chan streamResult }
 
 const outputRingSize = 1000
 
+const (
+	cleanupOptionRemove = 0
+	cleanupOptionKeep   = 1
+)
+
 type ExecModel struct {
 	width  int
 	height int
@@ -42,6 +47,8 @@ type ExecModel struct {
 	preDirEntries    []string
 
 	shellWrapperActive bool
+	confirmCleanup     bool
+	cleanupCursor      int
 	cleaningUp         bool
 	promptCD           bool
 	cdCursor           int
@@ -123,12 +130,15 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		m.streamChan = nil
 		if msg.err != nil {
 			m.lastErr = msg.err
-			if m.targetDir == "" {
+			if m.targetDir == "" || !m.hasCreatedEntries() {
 				m.done = true
 				return m, nil
 			}
-			m.cleaningUp = true
-			return m, m.runCleanup()
+			// NOTE: late steps (push, remote…) can fail on a fully scaffolded
+			// project, so the user decides whether the created files are removed.
+			m.confirmCleanup = true
+			m.cleanupCursor = cleanupOptionKeep
+			return m, nil
 		}
 		m.current++
 		if m.current >= len(m.steps) {
@@ -145,6 +155,25 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.confirmCleanup {
+			switch msg.String() {
+			case "up", "k", "left", "h":
+				m.cleanupCursor = cleanupOptionRemove
+			case "down", "j", "right", "l":
+				m.cleanupCursor = cleanupOptionKeep
+			case " ", "enter":
+				m.confirmCleanup = false
+				if m.cleanupCursor == cleanupOptionRemove {
+					m.cleaningUp = true
+					return m, m.runCleanup()
+				}
+				m.done = true
+			case "esc":
+				m.confirmCleanup = false
+				m.done = true
+			}
+			break
+		}
 		if m.promptCD {
 			if !m.shellWrapperActive {
 				// No wrapper: any key quits
@@ -235,6 +264,28 @@ func (m *ExecModel) appendLine(line string) {
 	}
 }
 
+// hasCreatedEntries reports whether the failed run left anything behind that
+// did not exist before kapi started.
+func (m ExecModel) hasCreatedEntries() bool {
+	entries, err := os.ReadDir(m.targetDir)
+	if err != nil {
+		return false
+	}
+	if !m.dirExistedBefore {
+		return true
+	}
+	pre := make(map[string]struct{}, len(m.preDirEntries))
+	for _, name := range m.preDirEntries {
+		pre[name] = struct{}{}
+	}
+	for _, e := range entries {
+		if _, ok := pre[e.Name()]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (m ExecModel) runCleanup() tea.Cmd {
 	targetDir := m.targetDir
 	existedBefore := m.dirExistedBefore
@@ -297,6 +348,25 @@ func (m ExecModel) View() string {
 	switch {
 	case m.cleaningUp:
 		sb.WriteString(styles.MutedStyle.Render("  Cleaning up...") + "\n")
+	case m.confirmCleanup:
+		sb.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  ✗ Error: %s", m.lastErr)) + "\n")
+		sb.WriteString("\n")
+		sb.WriteString(styles.MutedStyle.Render("  What should kapi do with the files it created in "+truncatePath(m.targetDir)+"?") + "\n")
+		cleanupOpts := []string{"remove created files", "keep files"}
+		var optStr strings.Builder
+		for i, opt := range cleanupOpts {
+			if i > 0 {
+				optStr.WriteString(styles.DimStyle.Render("  ·  "))
+			}
+			if i == m.cleanupCursor {
+				optStr.WriteString(styles.SelectedStyle.Render(opt))
+			} else {
+				optStr.WriteString(styles.DimStyle.Render(opt))
+			}
+		}
+		fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("  ❯❯"), "  "+optStr.String())
+		sb.WriteString("\n")
+		sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm   [esc] keep files") + "\n")
 	case m.done && m.lastErr != nil:
 		sb.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  ✗ Error: %s", m.lastErr)) + "\n")
 		sb.WriteString(styles.MutedStyle.Render("  [↵] back to summary") + "\n")

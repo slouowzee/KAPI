@@ -392,3 +392,101 @@ func TestExecUpdate_PromptCD_LKeyNavigatesDown(t *testing.T) {
 		t.Errorf("'l' should move cursor to 1, got %d", m.cdCursor)
 	}
 }
+
+func newFailedExecModel(t *testing.T, existedBefore bool) (ExecModel, string) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "app")
+	if existedBefore {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := NewExec(80, 24, []ExecStep{{Label: "step1", Fn: func() error { return nil }}}, dir)
+	return m, dir
+}
+
+func TestExecUpdate_StepError_AsksBeforeCleanup(t *testing.T) {
+	m, dir := newFailedExecModel(t, false)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, cmd := m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+	if !updated.confirmCleanup {
+		t.Fatal("confirmCleanup should be true after a failed step that created files")
+	}
+	if updated.cleaningUp || cmd != nil {
+		t.Error("cleanup must not start before the user confirms")
+	}
+	if updated.cleanupCursor != cleanupOptionKeep {
+		t.Errorf("default choice should keep files, got %d", updated.cleanupCursor)
+	}
+}
+
+func TestExecUpdate_StepError_NothingCreated_Done(t *testing.T) {
+	m, _ := newFailedExecModel(t, false)
+
+	updated, _ := m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+	if updated.confirmCleanup {
+		t.Error("confirmCleanup should be false when nothing was created")
+	}
+	if !updated.done || !updated.HasErr() {
+		t.Error("model should be done with an error")
+	}
+}
+
+func TestExecUpdate_ConfirmCleanup(t *testing.T) {
+	tests := []struct {
+		name        string
+		keys        []string
+		wantRemoved bool
+	}{
+		{name: "remove created files", keys: []string{"left", "enter"}, wantRemoved: true},
+		{name: "keep files with enter", keys: []string{"enter"}, wantRemoved: false},
+		{name: "keep files with esc", keys: []string{"left", "esc"}, wantRemoved: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, dir := newFailedExecModel(t, true)
+			created := filepath.Join(dir, "created.txt")
+			if err := os.WriteFile(created, []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			m, _ = m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+			var cmd tea.Cmd
+			for _, k := range tt.keys {
+				msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+				switch k {
+				case "left":
+					msg = tea.KeyMsg{Type: tea.KeyLeft}
+				case "enter":
+					msg = tea.KeyMsg{Type: tea.KeyEnter}
+				case "esc":
+					msg = tea.KeyMsg{Type: tea.KeyEsc}
+				}
+				m, cmd = m.Update(msg)
+			}
+			if cmd != nil {
+				m, _ = m.Update(cmd())
+			}
+
+			_, err := os.Stat(created)
+			if removed := os.IsNotExist(err); removed != tt.wantRemoved {
+				t.Errorf("created file removed = %v, want %v", removed, tt.wantRemoved)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "keep.txt")); err != nil {
+				t.Error("pre-existing file must always be kept")
+			}
+			if !m.done {
+				t.Error("model should be done after the cleanup choice")
+			}
+		})
+	}
+}
