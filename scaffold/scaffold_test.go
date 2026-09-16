@@ -824,3 +824,42 @@ func TestInstallPlan(t *testing.T) {
 		})
 	}
 }
+
+func TestStopRunningCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell")
+	}
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		// "started" is printed once both sleeps belong to the process group.
+		script := "sleep 30 & sleep 30 & echo started; wait"
+		done <- streamCmd("", "sh", "-c", script)(context.Background(), func(line string) {
+			if line == "started" {
+				close(started)
+			}
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("command did not start")
+	}
+	StopRunningCommands()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected an error for a terminated command")
+		}
+	case <-time.After(abortGracePeriod + 3*time.Second):
+		t.Fatal("command kept running after StopRunningCommands")
+	}
+
+	running.mu.Lock()
+	defer running.mu.Unlock()
+	if len(running.procs) != 0 {
+		t.Errorf("%d commands still tracked after they exited", len(running.procs))
+	}
+}

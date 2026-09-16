@@ -539,6 +539,8 @@ func runStreamed(c *exec.Cmd, onLine func(string)) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
+	untrack := trackRunning(c)
+	defer untrack()
 
 	err := c.Wait()
 	w.flush()
