@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -447,12 +449,14 @@ func TestSave_LeavesNoTemporaryFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "config.json" {
-		names := make([]string, len(entries))
-		for i, e := range entries {
-			names[i] = e.Name()
-		}
-		t.Errorf("config dir contains %v, want only config.json", names)
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	// The lock file is kept on purpose: removing it would race with other
+	// processes waiting on it.
+	if !slices.Equal(names, []string{"config.json", "config.json.lock"}) {
+		t.Errorf("config dir contains %v, want only config.json and its lock", names)
 	}
 }
 
@@ -501,5 +505,57 @@ func TestGithubToken_FallsBackToGhCLI(t *testing.T) {
 
 	if got := GithubToken(); got != "gh-token" {
 		t.Errorf("GithubToken() = %q, want gh-token", got)
+	}
+}
+
+// TestConfigHelperProcess is not a real test: it is started as a separate
+// process by TestUpdate_ConcurrentProcessesAreNotLost.
+func TestConfigHelperProcess(t *testing.T) {
+	if os.Getenv("KAPI_CONFIG_HELPER") != "1" {
+		return
+	}
+	id := os.Getenv("KAPI_CONFIG_HELPER_ID")
+	for i := 0; i < 25; i++ {
+		err := Update(func(cfg *Config) error {
+			if cfg.Favorites == nil {
+				cfg.Favorites = make(map[string][]FavoritePackage)
+			}
+			cfg.Favorites["nextjs"] = append(cfg.Favorites["nextjs"], FavoritePackage{Name: fmt.Sprintf("%s-%d", id, i)})
+			return nil
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(0)
+}
+
+func TestUpdate_ConcurrentProcessesAreNotLost(t *testing.T) {
+	home := setupTempHome(t)
+
+	const processes = 4
+	cmds := make([]*exec.Cmd, processes)
+	for p := range cmds {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestConfigHelperProcess$")
+		cmd.Env = append(os.Environ(), "KAPI_CONFIG_HELPER=1", fmt.Sprintf("KAPI_CONFIG_HELPER_ID=%d", p), "HOME="+home)
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		cmds[p] = cmd
+	}
+	for _, cmd := range cmds {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("helper process failed: %v", err)
+		}
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cfg.Favorites["nextjs"]); got != processes*25 {
+		t.Errorf("got %d favorites, want %d: concurrent processes lost updates", got, processes*25)
 	}
 }

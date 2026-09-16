@@ -183,12 +183,45 @@ func Load() (Config, error) {
 // concurrent goroutines and would otherwise overwrite each other's changes.
 var writeMu sync.Mutex
 
+// lockConfig serializes config writes across goroutines and kapi processes
+// (e.g. the TUI and `kapi freeze` running in another terminal).
+func lockConfig() (unlock func(), err error) {
+	writeMu.Lock()
+	path, err := configPath()
+	if err != nil {
+		writeMu.Unlock()
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		writeMu.Unlock()
+		return nil, err
+	}
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		writeMu.Unlock()
+		return nil, fmt.Errorf("open config lock: %w", err)
+	}
+	if err := lockFile(f); err != nil {
+		_ = f.Close()
+		writeMu.Unlock()
+		return nil, fmt.Errorf("lock config: %w", err)
+	}
+	return func() {
+		_ = unlockFile(f)
+		_ = f.Close()
+		writeMu.Unlock()
+	}, nil
+}
+
 // Update loads the config, applies fn and saves the result. If the config
 // cannot be read, fn is not called and nothing is written, so an unreadable
 // file is never replaced by an empty config.
 func Update(fn func(cfg *Config) error) error {
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	unlock, err := lockConfig()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	cfg, err := Load()
 	if err != nil {
@@ -201,8 +234,11 @@ func Update(fn func(cfg *Config) error) error {
 }
 
 func Save(cfg Config) error {
-	writeMu.Lock()
-	defer writeMu.Unlock()
+	unlock, err := lockConfig()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return save(cfg)
 }
 
