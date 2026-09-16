@@ -243,7 +243,9 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 		return vanillaPhpSteps(targetDir, name, parent)
 
 	case "nextjs":
-		return jsExecStep(parent, pm, "create-next-app@latest", name)
+		// NOTE: the flag keeps the chosen package manager when the initializer
+		// is run through npx (e.g. Yarn 1 fallback).
+		return jsExecStep(parent, pm, "create-next-app@latest", name, "--use-"+pm.CacheKey())
 	case "nuxt":
 		return jsExecStep(parent, pm, "nuxi@latest", "init", name)
 	case "remix":

@@ -340,13 +340,13 @@ func TestGithubActionsCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
 	}
 }
 
-func TestGithubActionsCI_JS_Yarn_UsesIfPresentBefore(t *testing.T) {
+func TestGithubActionsCI_JS_Yarn_GuardsMissingScripts(t *testing.T) {
 	out := githubActionsCI(jsfw("nuxt"), packagemanager.Yarn)
-	if !strings.Contains(out, "yarn run --if-present test") {
-		t.Errorf("yarn CI should contain 'yarn run --if-present test', got:\n%s", out)
+	if !strings.Contains(out, "then yarn run test; fi") {
+		t.Errorf("yarn CI should only run the test script when it exists, got:\n%s", out)
 	}
-	if strings.Contains(out, "yarn run test --if-present") {
-		t.Errorf("yarn CI must not put --if-present after script name, got:\n%s", out)
+	if strings.Contains(out, "--if-present") {
+		t.Errorf("yarn does not support --if-present, got:\n%s", out)
 	}
 }
 

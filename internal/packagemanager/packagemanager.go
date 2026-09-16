@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 )
 
 type PM int
@@ -63,11 +65,35 @@ func (pm PM) Exec() string {
 	}
 }
 
+// yarnSupportsDlx is a variable so tests can simulate either Yarn flavour.
+var yarnSupportsDlx = sync.OnceValue(detectYarnDlx)
+
+// detectYarnDlx reports whether `yarn dlx` is available: Yarn 2+ and the
+// Corepack shim support it, a globally installed Yarn 1 does not.
+func detectYarnDlx() bool {
+	path, err := exec.LookPath("yarn")
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil && strings.Contains(resolved, "corepack") {
+		return true
+	}
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(strings.TrimSpace(string(out)), "1.")
+}
+
 func (pm PM) ExecArgs() []string {
 	switch pm {
 	case PNPM:
 		return []string{"pnpm", "dlx"}
 	case Yarn:
+		if !yarnSupportsDlx() {
+			// NOTE: Yarn 1 has no dlx; npx ships with Node and runs the same package.
+			return []string{"npx"}
+		}
 		return []string{"yarn", "dlx"}
 	case Bun:
 		return []string{"bunx"}
@@ -131,7 +157,8 @@ func (pm PM) RunIfPresent(script string) string {
 	case PNPM:
 		return "pnpm run --if-present " + script
 	case Yarn:
-		return "yarn run --if-present " + script
+		// NOTE: neither Yarn 1 nor Yarn Berry supports --if-present.
+		return `if node -e "(require('./package.json').scripts||{}).` + script + `||process.exit(1)"; then yarn run ` + script + `; fi`
 	case Bun:
 		return "npm run " + script + " --if-present"
 	default:

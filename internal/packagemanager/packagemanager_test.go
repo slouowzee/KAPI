@@ -71,21 +71,31 @@ func TestAll(t *testing.T) {
 	}
 }
 
+func withYarnDlx(t *testing.T, supported bool) {
+	t.Helper()
+	orig := yarnSupportsDlx
+	yarnSupportsDlx = func() bool { return supported }
+	t.Cleanup(func() { yarnSupportsDlx = orig })
+}
+
 func TestExecArgs(t *testing.T) {
 	cases := []struct {
-		pm   PM
-		want []string
+		pm      PM
+		yarnDlx bool
+		want    []string
 	}{
-		{NPM, []string{"npx"}},
-		{PNPM, []string{"pnpm", "dlx"}},
-		{Yarn, []string{"yarn", "dlx"}},
-		{Bun, []string{"bunx"}},
-		{None, []string{"npx"}},
+		{NPM, true, []string{"npx"}},
+		{PNPM, true, []string{"pnpm", "dlx"}},
+		{Yarn, true, []string{"yarn", "dlx"}},
+		{Yarn, false, []string{"npx"}},
+		{Bun, true, []string{"bunx"}},
+		{None, true, []string{"npx"}},
 	}
 	for _, c := range cases {
+		withYarnDlx(t, c.yarnDlx)
 		got := c.pm.ExecArgs()
 		if !slices.Equal(got, c.want) {
-			t.Errorf("PM(%v).ExecArgs() = %v, want %v", c.pm, got, c.want)
+			t.Errorf("PM(%v).ExecArgs() with yarn dlx=%v = %v, want %v", c.pm, c.yarnDlx, got, c.want)
 		}
 	}
 }
@@ -188,8 +198,8 @@ func TestRunIfPresent_FlagPosition(t *testing.T) {
 		{NPM, "build", "npm run build --if-present"},
 		{PNPM, "test", "pnpm run --if-present test"},
 		{PNPM, "build", "pnpm run --if-present build"},
-		{Yarn, "test", "yarn run --if-present test"},
-		{Yarn, "build", "yarn run --if-present build"},
+		{Yarn, "test", `if node -e "(require('./package.json').scripts||{}).test||process.exit(1)"; then yarn run test; fi`},
+		{Yarn, "build", `if node -e "(require('./package.json').scripts||{}).build||process.exit(1)"; then yarn run build; fi`},
 		{Bun, "test", "npm run test --if-present"},
 		{Bun, "build", "npm run build --if-present"},
 		{None, "test", "npm run test --if-present"},
