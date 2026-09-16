@@ -3,6 +3,7 @@ package screens
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -221,5 +222,25 @@ func TestPackages_StarsRequestedOnceForFocusedPackage(t *testing.T) {
 	m.cursor = 1
 	if _, cmd = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}); cmd != nil {
 		t.Error("packages without repository must not trigger a request")
+	}
+}
+
+func TestPackages_ConfirmHint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fw := registry.Framework{ID: "nextjs", Name: "Next.js", Ecosystem: "js"}
+	tests := []struct {
+		name  string
+		model PackagesModel
+		want  string
+	}{
+		{name: "wizard", model: NewPackages(120, 40, fw, "/tmp/app"), want: "[↵] confirm"},
+		{name: "browse", model: NewPackages(120, 40, fw, "/tmp/app").WithConfirmLabel("install"), want: "[↵] install"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if view := tt.model.View(); !strings.Contains(view, tt.want) {
+				t.Errorf("view does not contain %q", tt.want)
+			}
+		})
 	}
 }

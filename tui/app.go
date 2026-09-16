@@ -575,7 +575,7 @@ func (a App) startBrowse(eco ecosystem.Ecosystem) (App, tea.Cmd) {
 	}
 	a.selectedFramework = fw
 	a.screen = ScreenPackages
-	a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir)
+	a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir).WithConfirmLabel("install")
 	return a, a.packages.Init()
 }
 

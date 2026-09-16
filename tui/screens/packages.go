@@ -185,6 +185,9 @@ type PackagesModel struct {
 	searchCancel context.CancelFunc
 	// versionsFor is the package whose versions are being fetched for a freeze.
 	versionsFor string
+	// confirmLabel describes what enter does ("confirm" in the wizard,
+	// "install" when browsing an existing project).
+	confirmLabel string
 
 	savedCart    []packages.Package
 	freezeData   map[string]config.FreezeVersionPackage
@@ -258,6 +261,19 @@ func loadFreezeData(isPhp bool) map[string]config.FreezeVersionPackage {
 func (m *PackagesModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+}
+
+// WithConfirmLabel changes the action shown for the enter key.
+func (m PackagesModel) WithConfirmLabel(label string) PackagesModel {
+	m.confirmLabel = label
+	return m
+}
+
+func (m PackagesModel) confirmHint() string {
+	if m.confirmLabel == "" {
+		return "[↵] confirm"
+	}
+	return "[↵] " + m.confirmLabel
 }
 
 func (m PackagesModel) SelectedPackages() []packages.Package { return m.cart }
@@ -1041,21 +1057,22 @@ func (m PackagesModel) View() string {
 		sb.WriteString("  " + input + "\n\n")
 	}
 
+	confirm := m.confirmHint()
 	var hints string
 	if m.inFreezeView {
 		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] favorite   [ctrl+g] unfreeze   [ctrl+b] close   [esc] back   [ctrl+c] quit"
 	} else if m.inCartMode {
-		hints = "  [↑↓] navigate cart   [space] remove   [ctrl+f] favorite   [tab] focus search   [ctrl+x] favorites   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate cart   [space] remove   [ctrl+f] favorite   [tab] focus search   [ctrl+x] favorites   " + confirm + "   [ctrl+c] quit"
 	} else if m.inFavoritesMode {
-		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] remove   [tab] focus cart   [ctrl+x] close   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] remove   [tab] focus cart   [ctrl+x] close   " + confirm + "   [ctrl+c] quit"
 	} else if m.selectVersion {
 		hints = "  [↑↓] choose version   [enter] confirm   [esc] cancel"
 	} else if m.inputNote {
 		hints = "  [enter] confirm   [esc] skip"
 	} else {
-		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] fav   [tab] focus cart   [ctrl+x] favs   [ctrl+b] frozen   [ctrl+g] freeze   [↵] confirm   [ctrl+c] quit"
+		hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] fav   [tab] focus cart   [ctrl+x] favs   [ctrl+b] frozen   [ctrl+g] freeze   " + confirm + "   [ctrl+c] quit"
 		if m.query != "" {
-			hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] fav   [tab] focus cart   [ctrl+x] favs   [ctrl+b] frozen   [ctrl+g] freeze   [esc] clear   [↵] confirm   [ctrl+c] quit"
+			hints = "  [↑↓] navigate   [space] toggle   [ctrl+f] fav   [tab] focus cart   [ctrl+x] favs   [ctrl+b] frozen   [ctrl+g] freeze   [esc] clear   " + confirm + "   [ctrl+c] quit"
 		}
 	}
 	sb.WriteString(styles.MutedStyle.Render(hints) + "\n")
