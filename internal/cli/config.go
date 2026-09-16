@@ -38,28 +38,27 @@ func HandleConfig(args []string) {
 	}
 
 	value := args[1]
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
 
+	var apply func(cfg *config.Config)
 	switch key {
 	case "github.token":
-		cfg.GithubToken = value
+		apply = func(cfg *config.Config) { cfg.GithubToken = value }
 	case "package.manager":
 		pm := packagemanager.Parse(value)
 		if pm == packagemanager.None {
 			fmt.Fprintf(os.Stderr, "Invalid package manager %q. Valid values: npm, pnpm, yarn, bun\n", value)
 			os.Exit(1)
 		}
-		cfg.PackageManager = pm.String()
+		apply = func(cfg *config.Config) { cfg.PackageManager = pm.String() }
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown configuration key: %s\n", key)
 		os.Exit(1)
 	}
 
-	if err := config.Save(cfg); err != nil {
+	if err := config.Update(func(cfg *config.Config) error {
+		apply(cfg)
+		return nil
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to save config: %v\n", err)
 		os.Exit(1)
 	}

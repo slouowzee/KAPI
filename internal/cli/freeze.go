@@ -77,37 +77,15 @@ func HandleFreeze(args []string) {
 
 	note := promptNote()
 
-	cfg, err := config.Load()
+	err := config.Update(func(cfg *config.Config) error {
+		cfg.SetFrozen(registryName, config.FreezeVersionPackage{
+			Name:    pkg.Name,
+			Version: version,
+			Note:    note,
+		})
+		return nil
+	})
 	if err != nil {
-		fmt.Printf("Error loading configuration: %v\n", err)
-		os.Exit(1)
-	}
-
-	if cfg.FreezeVersionPackages == nil {
-		cfg.FreezeVersionPackages = make(map[string][]config.FreezeVersionPackage)
-	}
-
-	freezePkg := config.FreezeVersionPackage{
-		Name:    pkg.Name,
-		Version: version,
-		Note:    note,
-	}
-
-	exists := false
-	for i, f := range cfg.FreezeVersionPackages[registryName] {
-		if f.Name == pkg.Name {
-			cfg.FreezeVersionPackages[registryName][i].Version = version
-			cfg.FreezeVersionPackages[registryName][i].Note = note
-			exists = true
-			break
-		}
-	}
-
-	if !exists {
-		cfg.FreezeVersionPackages[registryName] = append(cfg.FreezeVersionPackages[registryName], freezePkg)
-	}
-
-	if err := config.Save(cfg); err != nil {
 		fmt.Printf("Error saving configuration: %v\n", err)
 		os.Exit(1)
 	}

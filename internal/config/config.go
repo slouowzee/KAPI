@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -116,6 +117,43 @@ type FreezeVersionPackage struct {
 	Note    string `json:"note,omitempty"`
 }
 
+// SetFrozen adds or replaces the frozen version of a package for a registry
+// ("npm" or "packagist").
+func (c *Config) SetFrozen(registry string, pkg FreezeVersionPackage) {
+	if c.FreezeVersionPackages == nil {
+		c.FreezeVersionPackages = make(map[string][]FreezeVersionPackage)
+	}
+	for i, f := range c.FreezeVersionPackages[registry] {
+		if f.Name == pkg.Name {
+			c.FreezeVersionPackages[registry][i] = pkg
+			return
+		}
+	}
+	c.FreezeVersionPackages[registry] = append(c.FreezeVersionPackages[registry], pkg)
+}
+
+// RemoveFrozen removes a frozen package from the given registry, or from any
+// registry when registry is empty. It reports whether a package was removed.
+func (c *Config) RemoveFrozen(registry, name string) bool {
+	for reg, pkgs := range c.FreezeVersionPackages {
+		if registry != "" && reg != registry {
+			continue
+		}
+		for i, p := range pkgs {
+			if p.Name != name {
+				continue
+			}
+			if len(pkgs) == 1 {
+				delete(c.FreezeVersionPackages, reg)
+			} else {
+				c.FreezeVersionPackages[reg] = append(pkgs[:i:i], pkgs[i+1:]...)
+			}
+			return true
+		}
+	}
+	return false
+}
+
 func Load() (Config, error) {
 	var cfg Config
 	path, err := configPath()
@@ -135,7 +173,36 @@ func Load() (Config, error) {
 	return cfg, err
 }
 
+// writeMu serializes config writes inside the process: TUI commands run in
+// concurrent goroutines and would otherwise overwrite each other's changes.
+var writeMu sync.Mutex
+
+// Update loads the config, applies fn and saves the result. If the config
+// cannot be read, fn is not called and nothing is written, so an unreadable
+// file is never replaced by an empty config.
+func Update(fn func(cfg *Config) error) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
+	cfg, err := Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if err := fn(&cfg); err != nil {
+		return err
+	}
+	return save(cfg)
+}
+
 func Save(cfg Config) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return save(cfg)
+}
+
+// save writes the config to a temporary file and renames it over the real
+// one, so a crash mid-write never leaves a truncated config behind.
+func save(cfg Config) error {
 	path, err := configPath()
 	if err != nil {
 		return err
@@ -151,7 +218,28 @@ func Save(cfg Config) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o600)
+	tmp, err := os.CreateTemp(dir, "config-*.json")
+	if err != nil {
+		return fmt.Errorf("create temporary config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set config permissions: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temporary config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
 }
 
 func configPath() (string, error) {

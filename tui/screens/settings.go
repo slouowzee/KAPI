@@ -29,12 +29,11 @@ func detectInstalledPMsCmd() tea.Cmd {
 
 func savePMCmd(pm packagemanager.PM) tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load()
-		if err != nil {
-			return settingsSavedMsg{err: err}
-		}
-		cfg.PackageManager = pm.String()
-		return settingsSavedMsg{err: config.Save(cfg)}
+		err := config.Update(func(cfg *config.Config) error {
+			cfg.PackageManager = pm.String()
+			return nil
+		})
+		return settingsSavedMsg{err: err}
 	}
 }
 

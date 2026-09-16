@@ -91,30 +91,15 @@ func debounceCmd(query string) tea.Cmd {
 
 func freezeTuiCmd(name, version, note string, isPhp bool) tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load()
-		if err != nil {
-			return freezeActionMsg{action: "frozen", name: name, err: err}
-		}
-		if cfg.FreezeVersionPackages == nil {
-			cfg.FreezeVersionPackages = make(map[string][]config.FreezeVersionPackage)
-		}
 		reg := "npm"
 		if isPhp {
 			reg = "packagist"
 		}
-		fp := config.FreezeVersionPackage{Name: name, Version: version, Note: note}
-		exists := false
-		for i, f := range cfg.FreezeVersionPackages[reg] {
-			if f.Name == name {
-				cfg.FreezeVersionPackages[reg][i] = fp
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			cfg.FreezeVersionPackages[reg] = append(cfg.FreezeVersionPackages[reg], fp)
-		}
-		if err := config.Save(cfg); err != nil {
+		err := config.Update(func(cfg *config.Config) error {
+			cfg.SetFrozen(reg, config.FreezeVersionPackage{Name: name, Version: version, Note: note})
+			return nil
+		})
+		if err != nil {
 			return freezeActionMsg{action: "frozen", name: name, err: err}
 		}
 		return freezeActionMsg{action: "frozen", name: name, freezeData: loadFreezeData()}
@@ -123,31 +108,13 @@ func freezeTuiCmd(name, version, note string, isPhp bool) tea.Cmd {
 
 func unfreezeTuiCmd(name string) tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load()
+		err := config.Update(func(cfg *config.Config) error {
+			if !cfg.RemoveFrozen("", name) {
+				return fmt.Errorf("%s is not frozen", name)
+			}
+			return nil
+		})
 		if err != nil {
-			return freezeActionMsg{action: "unfrozen", name: name, err: err}
-		}
-		found := false
-		for reg, pkgs := range cfg.FreezeVersionPackages {
-			for i, p := range pkgs {
-				if p.Name == name {
-					if len(pkgs) == 1 {
-						delete(cfg.FreezeVersionPackages, reg)
-					} else {
-						cfg.FreezeVersionPackages[reg] = append(pkgs[:i], pkgs[i+1:]...)
-					}
-					found = true
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
-		if !found {
-			return freezeActionMsg{action: "unfrozen", name: name, err: fmt.Errorf("not frozen")}
-		}
-		if err := config.Save(cfg); err != nil {
 			return freezeActionMsg{action: "unfrozen", name: name, err: err}
 		}
 		return freezeActionMsg{action: "unfrozen", name: name, freezeData: loadFreezeData()}
