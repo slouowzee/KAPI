@@ -3,6 +3,9 @@ package screens
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/slouowzee/kapi/internal/registry"
 )
 
 func gitValue(cfg GitConfig) string {
@@ -146,5 +149,27 @@ func TestGitValue_UniversalGitignore(t *testing.T) {
 	got := gitValue(cfg)
 	if !strings.Contains(got, "universal gitignore") {
 		t.Errorf("gitValue() = %q, want to contain 'universal gitignore'", got)
+	}
+}
+
+func TestRecap_InvalidProjectNameBlocksConfirm(t *testing.T) {
+	tests := []struct {
+		name     string
+		dir      string
+		eco      string
+		wantDone bool
+	}{
+		{name: "valid js name", dir: "/tmp/my-app", eco: "js", wantDone: true},
+		{name: "invalid js name", dir: "/tmp/My App", eco: "js", wantDone: false},
+		{name: "php accepts uppercase", dir: "/tmp/MyApp", eco: "php", wantDone: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewRecap(80, 24, RecapSummary{Dir: tt.dir, Framework: registry.Framework{ID: "x", Ecosystem: tt.eco}})
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if updated.Done() != tt.wantDone {
+				t.Errorf("Done() = %v, want %v", updated.Done(), tt.wantDone)
+			}
+		})
 	}
 }

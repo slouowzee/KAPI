@@ -9,6 +9,7 @@ import (
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/scaffold"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
@@ -36,6 +37,8 @@ type RecapModel struct {
 
 	cursor int
 
+	nameErr string
+
 	done           bool
 	backSection    RecapSection
 	backPressed    bool
@@ -61,6 +64,7 @@ func NewRecap(width, height int, s RecapSummary) RecapModel {
 		gitCfg:    s.GitCfg,
 		pm:        s.PM,
 		cursor:    int(RECAP_SECTION_CONFIRM),
+		nameErr:   scaffold.ProjectNameError(s.Framework, s.Dir),
 	}
 }
 
@@ -125,7 +129,9 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 			sec := RecapSection(m.cursor)
 			switch sec {
 			case RECAP_SECTION_CONFIRM:
-				m.done = true
+				if m.nameErr == "" {
+					m.done = true
+				}
 			case RECAP_SECTION_ABANDON:
 				m.abandonPending = true
 			default:
@@ -168,6 +174,10 @@ func (m RecapModel) View() string {
 
 		if row.section == RECAP_SECTION_CONFIRM {
 			sb.WriteString("\n")
+			if m.nameErr != "" {
+				sb.WriteString(styles.ErrorStyle.Render("  ✗ "+m.nameErr) + "\n")
+				sb.WriteString(styles.DimStyle.Render("    Edit the directory to continue.") + "\n\n")
+			}
 			if isCursor {
 				fmt.Fprintf(&sb, "%s%s\n",
 					styles.CursorStyle.Render("  ❯❯"),

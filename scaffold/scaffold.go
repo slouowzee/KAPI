@@ -338,6 +338,11 @@ func wordpressSteps(name, parent string) []Step {
 	}}
 }
 
+func vanillaPhpComposerName(folder string) string {
+	part := composerPackageName(folder)
+	return part + "/" + part
+}
+
 func vanillaPhpSteps(targetDir, name, parent string) []Step {
 	return []Step{
 		{
@@ -346,7 +351,7 @@ func vanillaPhpSteps(targetDir, name, parent string) []Step {
 		},
 		{
 			Label:    "composer init (in " + name + ")",
-			StreamFn: streamCmd(targetDir, "composer", "init", "--no-interaction", "--name="+name+"/"+name),
+			StreamFn: streamCmd(targetDir, "composer", "init", "--no-interaction", "--name="+vanillaPhpComposerName(name)),
 		},
 	}
 }
