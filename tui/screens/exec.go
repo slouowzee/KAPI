@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
@@ -484,10 +485,7 @@ func (m ExecModel) renderOutputPanel() string {
 	inner := panelWidth - 2
 	rendered := make([]string, len(lines))
 	for i, l := range lines {
-		if len(l) > inner {
-			l = l[:inner-1] + "…"
-		}
-		rendered[i] = l
+		rendered[i] = fitOutputLine(l, inner)
 	}
 
 	box := lipgloss.NewStyle().
@@ -500,4 +498,14 @@ func (m ExecModel) renderOutputPanel() string {
 	indent := strings.Repeat(" ", hMargin)
 	indented := strings.ReplaceAll(box, "\n", "\n"+indent)
 	return indent + indented
+}
+
+// fitOutputLine keeps what a terminal would show for a command output line
+// (the text after the last carriage return) and truncates it to width by
+// display cells, without splitting multi-byte characters or ANSI sequences.
+func fitOutputLine(line string, width int) string {
+	if i := strings.LastIndexByte(line, '\r'); i >= 0 {
+		line = line[i+1:]
+	}
+	return ansi.Truncate(line, width, "…")
 }

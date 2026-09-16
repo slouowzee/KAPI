@@ -709,3 +709,31 @@ func TestMkdirSteps_CreateDirectoriesNatively(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamCmd_VeryLongLineDoesNotBlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell")
+	}
+	script := "head -c 3000000 /dev/zero | tr '\\0' a; echo; head -c 3000000 /dev/zero | tr '\\0' b; echo; echo done"
+	done := make(chan error, 1)
+	var lines []string
+	go func() {
+		done <- streamCmd("", "sh", "-c", script)(context.Background(), func(l string) {
+			if len(l) < 200 {
+				lines = append(lines, l)
+			}
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("command failed: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("streaming blocked on a very long output line")
+	}
+	if len(lines) == 0 || !strings.Contains(lines[len(lines)-1], "output line too long") {
+		t.Errorf("expected a notice about the long line, got %v", lines)
+	}
+}

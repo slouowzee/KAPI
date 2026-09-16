@@ -486,6 +486,10 @@ func gitSilentCmd(targetDir string, args ...string) *exec.Cmd {
 
 type streamFunc = func(ctx context.Context, onLine func(string)) error
 
+// maxOutputLine bounds a single streamed output line (progress bars may emit
+// very long lines without newlines).
+const maxOutputLine = 1024 * 1024
+
 // abortGracePeriod is how long an aborted command gets to exit after being
 // signalled before its pipes are forcibly closed.
 const abortGracePeriod = 5 * time.Second
@@ -532,9 +536,16 @@ func runStreamed(c *exec.Cmd, onLine func(string)) error {
 	scanPipe := func(r io.Reader) {
 		defer wg.Done()
 		s := bufio.NewScanner(r)
+		s.Buffer(make([]byte, 0, 64*1024), maxOutputLine)
 		for s.Scan() {
 			lines <- s.Text()
 		}
+		if s.Err() != nil {
+			lines <- "[kapi: output line too long, remaining output hidden]"
+		}
+		// NOTE: the pipe must be drained, otherwise a command writing more
+		// output blocks forever and Wait never returns.
+		_, _ = io.Copy(io.Discard, r)
 	}
 
 	wg.Add(2)

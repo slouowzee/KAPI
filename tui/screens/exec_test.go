@@ -4,9 +4,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestCleanupPartial_RemovesNewEntries(t *testing.T) {
@@ -530,5 +533,41 @@ func TestExecUpdate_QIgnoredWhileBusy(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if m.done || m.abortPending {
 		t.Error("q must not stop a running scaffold")
+	}
+}
+
+func TestFitOutputLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		width int
+		want  string
+	}{
+		{name: "short line unchanged", line: "added 12 packages", width: 40, want: "added 12 packages"},
+		{name: "ascii truncated", line: "abcdefghij", width: 5, want: "abcd…"},
+		{name: "multi-byte characters stay valid", line: "ééééééééé", width: 5, want: "éééé…"},
+		{name: "carriage return keeps last update", line: "progress 10%\rprogress 90%\rdone", width: 40, want: "done"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fitOutputLine(tt.line, tt.width)
+			if got != tt.want {
+				t.Errorf("fitOutputLine(%q, %d) = %q, want %q", tt.line, tt.width, got, tt.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("result %q is not valid UTF-8", got)
+			}
+		})
+	}
+}
+
+func TestFitOutputLine_KeepsANSISequencesIntact(t *testing.T) {
+	line := "\x1b[32m" + strings.Repeat("x", 50) + "\x1b[0m"
+	got := fitOutputLine(line, 10)
+	if w := ansi.StringWidth(got); w > 10 {
+		t.Errorf("display width = %d, want <= 10", w)
+	}
+	if !strings.HasPrefix(got, "\x1b[32m") {
+		t.Errorf("color sequence was cut: %q", got)
 	}
 }
