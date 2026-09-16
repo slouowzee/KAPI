@@ -133,10 +133,9 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 			break
 		}
 
+		// NOTE: the package manager row is skipped for PHP when moving, it
+		// must not shorten the list: abandon stays reachable.
 		maxCursor := int(RECAP_SECTION_ABANDON)
-		if m.framework.Ecosystem == "php" {
-			maxCursor = int(RECAP_SECTION_ABANDON) - 1
-		}
 
 		switch msg.String() {
 		case "up", "k":

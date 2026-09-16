@@ -221,3 +221,27 @@ func TestGitValue_GithubHTTPS(t *testing.T) {
 		t.Errorf("gitValue() = %q, want the https protocol shown", got)
 	}
 }
+
+func TestRecap_CursorReachesAbandon(t *testing.T) {
+	for _, eco := range []string{"php", "js"} {
+		t.Run(eco, func(t *testing.T) {
+			m := NewRecap(80, 24, RecapSummary{Framework: registry.Framework{ID: "x", Ecosystem: eco}})
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+			if RecapSection(m.cursor) != RECAP_SECTION_ABANDON {
+				t.Errorf("cursor = %d, want RECAP_SECTION_ABANDON", m.cursor)
+			}
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if !m.IsAbandonPending() {
+				t.Error("enter on abandon should ask for confirmation")
+			}
+		})
+	}
+}
+
+func TestRecap_PHPSkipsPackageManagerRow(t *testing.T) {
+	m := NewRecap(80, 24, RecapSummary{Framework: registry.Framework{ID: "laravel", Ecosystem: "php"}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if RecapSection(m.cursor) != RECAP_SECTION_GIT {
+		t.Errorf("cursor = %d, want RECAP_SECTION_GIT (package manager row skipped)", m.cursor)
+	}
+}
