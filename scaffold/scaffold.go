@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/gitconfig"
+	"github.com/slouowzee/kapi/internal/github"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
@@ -129,11 +131,11 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 				Fn: func() error {
 					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 					defer cancel()
-					url, err := createGithubRepo(ctx, name, private)
+					repo, err := github.CreateRepo(ctx, config.GithubToken(), name, private)
 					if err != nil {
 						return err
 					}
-					*sshURL = url
+					*sshURL = repo.SSHURL
 					return nil
 				},
 			},

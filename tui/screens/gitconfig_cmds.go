@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
+	"github.com/slouowzee/kapi/internal/github"
 )
 
 type gitcfgDetectionMsg struct {
@@ -243,58 +243,13 @@ func execGitKeyDeleteCmd(format, key string) tea.Cmd {
 
 func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
 	return func() tea.Msg {
-		tok := config.GithubToken()
-		if tok == "" {
-			return gitcfgExecMsg{err: errors.New("GitHub token not found")}
-		}
-
-		bodyData := map[string]any{
-			"name":    name,
-			"private": private,
-		}
-		reqBody, err := json.Marshal(bodyData)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		repo, err := github.CreateRepo(ctx, config.GithubToken(), name, private)
 		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not encode GitHub API request body: %w", err)}
+			return gitcfgExecMsg{err: err}
 		}
-
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.github.com/user/repos", bytes.NewReader(reqBody))
-		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not create GitHub API request: %w", err)}
-		}
-		req.Header.Set("Authorization", "Bearer "+tok)
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-		httpClient := &http.Client{Timeout: 15 * time.Second}
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not create repo on GitHub: %w", err)}
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not read GitHub API response: %w", err)}
-		}
-
-		if resp.StatusCode == http.StatusUnprocessableEntity {
-			return gitcfgExecMsg{err: fmt.Errorf("GitHub repo '%s' already exists", name)}
-		}
-		if resp.StatusCode != http.StatusCreated {
-			return gitcfgExecMsg{err: fmt.Errorf("failed to create repo (HTTP %d): %s", resp.StatusCode, string(bodyBytes))}
-		}
-
-		var result struct {
-			SSHUrl string `json:"ssh_url"`
-		}
-		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return gitcfgExecMsg{err: errors.New("failed to parse GitHub response")}
-		}
-
-		sshUrl := result.SSHUrl
-		if sshUrl == "" {
-			return gitcfgExecMsg{err: errors.New("no SSH URL in GitHub response")}
-		}
+		sshUrl := repo.SSHURL
 
 		chk := exec.Command("git", "remote", "get-url", "origin")
 		chk.Dir = dir
