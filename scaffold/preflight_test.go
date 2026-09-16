@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/gitconfig"
@@ -177,5 +178,27 @@ func assertIssues(t *testing.T, kind string, got, want []string) {
 		if !found {
 			t.Errorf("%s issues = %q, want one containing %q", kind, got, w)
 		}
+	}
+}
+
+func TestPreflight_ScopeCheckTimesOut(t *testing.T) {
+	orig := scopeCheckTimeout
+	scopeCheckTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { scopeCheckTimeout = orig })
+
+	env := fakePreflightEnv([]string{"php", "composer", "git"}, map[string]string{"user.name": "Me", "user.email": "me@example.com"}, "tok", config.TokenScopes{}, nil)
+	env.scopes = func(ctx context.Context) (config.TokenScopes, error) {
+		<-ctx.Done() // simulates an unreachable GitHub API
+		return config.TokenScopes{}, ctx.Err()
+	}
+
+	start := time.Now()
+	issues := preflight(context.Background(), env, filepath.Join(t.TempDir(), "app"), fw("laravel"), gitconfig.GitConfig{InitLocal: true, InitialCommit: true, RemoteHost: "github"}, packagemanager.None, false)
+
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("preflight took %v, want the scope check to give up quickly", elapsed)
+	}
+	if HasBlocking(issues) || len(issues) != 1 || !strings.Contains(issues[0].Message, "could not verify") {
+		t.Errorf("issues = %+v, want a single non-blocking warning", issues)
 	}
 }

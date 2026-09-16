@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/gitconfig"
@@ -93,7 +94,7 @@ func preflight(ctx context.Context, env preflightEnv, targetDir string, fw regis
 	if hasRepo && gitCfg.RemoteHost == "github" && !gitCfg.HasExistingRemote {
 		if env.token() == "" {
 			blocking("a GitHub token is required to create the repository: kapi config github.token <token>")
-		} else if scopes, err := env.scopes(ctx); err != nil {
+		} else if scopes, err := checkScopes(ctx, env); err != nil {
 			warning("could not verify the GitHub token scopes: %v", err)
 		} else if !scopes.Repo {
 			blocking("the GitHub token is missing the repo scope needed to create repositories")
@@ -101,6 +102,16 @@ func preflight(ctx context.Context, env preflightEnv, targetDir string, fw regis
 	}
 
 	return issues
+}
+
+// scopeCheckTimeout bounds the GitHub call so an offline machine does not
+// keep the summary waiting. It is a variable so tests can shorten it.
+var scopeCheckTimeout = 4 * time.Second
+
+func checkScopes(ctx context.Context, env preflightEnv) (config.TokenScopes, error) {
+	ctx, cancel := context.WithTimeout(ctx, scopeCheckTimeout)
+	defer cancel()
+	return env.scopes(ctx)
 }
 
 // requiredTools lists the executables the planned steps run.
