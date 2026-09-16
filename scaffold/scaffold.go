@@ -266,13 +266,13 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 		return jsExecStep(parent, pm, "@react-native-community/cli@latest", "init", name)
 
 	case "react-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "react-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "react-ts")...)
 	case "vue-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "vue-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "vue-ts")...)
 	case "svelte-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "svelte-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "svelte-ts")...)
 	case "vanilla-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "vanilla-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "vanilla-ts")...)
 	case "express":
 		return jsExecStreamStep(parent, pm, "express-generator", name)
 	case "fastify":
@@ -288,6 +288,18 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 		Label:    "mkdir " + targetDir,
 		StreamFn: streamCmd("", "mkdir", "-p", targetDir),
 	}}
+}
+
+// viteArgs builds create-vite arguments. Only npm needs the extra `--` to
+// forward flags; other package managers would pass it through and make
+// create-vite ignore the template.
+func viteArgs(pm packagemanager.PM, name, template string) []string {
+	args := []string{name}
+	if pm == packagemanager.NPM || pm == packagemanager.None {
+		args = append(args, "--")
+	}
+	// NOTE: streamed steps have no stdin, so prompts must be disabled.
+	return append(args, "--template", template, "--no-interactive")
 }
 
 func jsExecStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {

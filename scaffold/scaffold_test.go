@@ -631,3 +631,23 @@ func TestFrameworkSteps_JSInitializers(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameworkSteps_ViteTemplateFlags(t *testing.T) {
+	tests := []struct {
+		pm   packagemanager.PM
+		want string
+	}{
+		{pm: packagemanager.NPM, want: "npm create vite@latest app -- --template vue-ts --no-interactive"},
+		{pm: packagemanager.PNPM, want: "pnpm create vite@latest app --template vue-ts --no-interactive"},
+		{pm: packagemanager.Yarn, want: "yarn create vite@latest app --template vue-ts --no-interactive"},
+		{pm: packagemanager.Bun, want: "bun create vite@latest app --template vue-ts --no-interactive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pm.String(), func(t *testing.T) {
+			steps := frameworkSteps("/tmp/x/app", jsfw("vue-vite"), tt.pm)
+			if steps[0].Label != tt.want {
+				t.Errorf("label = %q, want %q", steps[0].Label, tt.want)
+			}
+		})
+	}
+}
