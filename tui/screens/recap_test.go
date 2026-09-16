@@ -136,11 +136,23 @@ func TestGitValue_ExistingGit_WithRemote(t *testing.T) {
 	}
 }
 
-func TestGitValue_ExistingGit_NoRemote_IsNone(t *testing.T) {
-	cfg := GitConfig{HasExistingGit: true, RemoteHost: ""}
-	got := gitValue(cfg)
-	if got != "none" {
-		t.Errorf("gitValue() = %q, want none when only HasExistingGit and no remote", got)
+func TestGitValue_WithoutNewRepo(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  GitConfig
+		want string
+	}{
+		{name: "existing repo is reported", cfg: GitConfig{HasExistingGit: true}, want: "local"},
+		{name: "collab and ci without repo", cfg: GitConfig{Collab: true, CI: ciChoiceGitHub}, want: "collab  ·  github CI"},
+		{name: "commit option ignored without init", cfg: GitConfig{InitialCommit: true, UniversalGitignore: true, CI: ciChoiceNone}, want: "none"},
+		{name: "commit option ignored on existing repo", cfg: GitConfig{HasExistingGit: true, InitialCommit: true}, want: "local"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := gitValue(tt.cfg); got != tt.want {
+				t.Errorf("gitValue() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
