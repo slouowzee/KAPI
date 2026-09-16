@@ -534,3 +534,72 @@ func TestDevBranchStep_KeepsExistingBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeGitignoreFn(t *testing.T) {
+	const universal = "# Env\n.env\n.env.*\n\nnode_modules/\n"
+
+	tests := []struct {
+		name     string
+		existing *string
+		want     []string
+		wantNot  []string
+	}{
+		{
+			name: "no existing file writes universal",
+			want: []string{"# Env", ".env", "node_modules/"},
+		},
+		{
+			name:     "keeps framework rules and appends missing ones",
+			existing: ptr("/storage/*.key\n.env\n"),
+			want:     []string{"/storage/*.key", ".env", ".env.*", "node_modules/", "# Added by kapi"},
+		},
+		{
+			name:     "nothing missing leaves file untouched",
+			existing: ptr(".env\n.env.*\nnode_modules/"),
+			wantNot:  []string{"# Added by kapi"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".gitignore")
+			if tt.existing != nil {
+				if err := os.WriteFile(path, []byte(*tt.existing), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := mergeGitignoreFn(dir, universal)(); err != nil {
+				t.Fatalf("mergeGitignoreFn: %v", err)
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(string(data), "\n")
+			count := func(rule string) int {
+				n := 0
+				for _, l := range lines {
+					if l == rule {
+						n++
+					}
+				}
+				return n
+			}
+			for _, w := range tt.want {
+				if count(w) != 1 {
+					t.Errorf("rule %q appears %d times, want exactly once:\n%s", w, count(w), data)
+				}
+			}
+			for _, w := range tt.wantNot {
+				if count(w) != 0 {
+					t.Errorf("rule %q should not be present:\n%s", w, data)
+				}
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }

@@ -51,8 +51,8 @@ func Plan(
 		})
 		if gitCfg.UniversalGitignore {
 			steps = append(steps, Step{
-				Label: "write universal .gitignore",
-				Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
+				Label: "merge universal .gitignore",
+				Fn:    mergeGitignoreFn(targetDir, universalGitignore),
 			})
 		}
 	}
@@ -543,6 +543,53 @@ func writeFileFn(targetDir, relPath, content string) func() error {
 			return err
 		}
 		return os.WriteFile(fullPath, []byte(content), 0o644)
+	}
+}
+
+// mergeGitignoreFn appends the universal rules that are missing from the
+// framework's own .gitignore instead of replacing it, so framework-specific
+// rules (storage keys, secrets, build dirs…) are preserved.
+func mergeGitignoreFn(targetDir, universal string) func() error {
+	return func() error {
+		path := filepath.Join(targetDir, ".gitignore")
+		existing, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return os.WriteFile(path, []byte(universal), 0o644)
+		}
+		if err != nil {
+			return fmt.Errorf("read .gitignore: %w", err)
+		}
+
+		present := make(map[string]struct{})
+		for _, line := range strings.Split(string(existing), "\n") {
+			present[strings.TrimSpace(line)] = struct{}{}
+		}
+
+		var missing []string
+		for _, line := range strings.Split(universal, "\n") {
+			rule := strings.TrimSpace(line)
+			if rule == "" || strings.HasPrefix(rule, "#") {
+				continue
+			}
+			if _, ok := present[rule]; ok {
+				continue
+			}
+			present[rule] = struct{}{}
+			missing = append(missing, rule)
+		}
+		if len(missing) == 0 {
+			return nil
+		}
+
+		var sb strings.Builder
+		sb.Write(existing)
+		if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n# Added by kapi\n")
+		sb.WriteString(strings.Join(missing, "\n"))
+		sb.WriteString("\n")
+		return os.WriteFile(path, []byte(sb.String()), 0o644)
 	}
 }
 
