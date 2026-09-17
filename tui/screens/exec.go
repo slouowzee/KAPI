@@ -1,6 +1,8 @@
 package screens
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
@@ -16,8 +19,10 @@ type ExecStep struct {
 	Label    string
 	Cmd      *exec.Cmd
 	Fn       func() error
-	StreamFn func(onLine func(string)) error
+	StreamFn func(ctx context.Context, onLine func(string)) error
 }
+
+var errAborted = errors.New("aborted by user")
 
 type execStepDoneMsg struct{ err error }
 type execAllDoneMsg struct{}
@@ -26,6 +31,11 @@ type execCleanupDoneMsg struct{ err error }
 type execStreamStartMsg struct{ ch chan streamResult }
 
 const outputRingSize = 1000
+
+const (
+	cleanupOptionRemove = 0
+	cleanupOptionKeep   = 1
+)
 
 type ExecModel struct {
 	width  int
@@ -41,7 +51,20 @@ type ExecModel struct {
 	dirExistedBefore bool
 	preDirEntries    []string
 
+	// ctx is cancelled when the user aborts; running streamed commands stop.
+	ctx          context.Context
+	cancel       context.CancelFunc
+	abortPending bool
+	aborted      bool
+
+	// installMode runs package installs in an existing project: no cleanup,
+	// no cd prompt, the user acknowledges the result and goes back.
+	installMode bool
+	ackPending  bool
+
 	shellWrapperActive bool
+	confirmCleanup     bool
+	cleanupCursor      int
 	cleaningUp         bool
 	promptCD           bool
 	cdCursor           int
@@ -58,11 +81,14 @@ type streamResult struct {
 }
 
 func NewExec(width, height int, steps []ExecStep, targetDir string) ExecModel {
+	ctx, cancel := context.WithCancel(context.Background())
 	m := ExecModel{
 		width:              width,
 		height:             height,
 		steps:              steps,
 		targetDir:          targetDir,
+		ctx:                ctx,
+		cancel:             cancel,
 		shellWrapperActive: os.Getenv("KAPI_SHELL_WRAPPER") == "1",
 	}
 
@@ -81,6 +107,13 @@ func NewExec(width, height int, steps []ExecStep, targetDir string) ExecModel {
 	return m
 }
 
+// NewInstallExec runs steps that modify an existing project.
+func NewInstallExec(width, height int, steps []ExecStep) ExecModel {
+	m := NewExec(width, height, steps, "")
+	m.installMode = true
+	return m
+}
+
 func (m *ExecModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
@@ -92,6 +125,18 @@ func (m ExecModel) Err() error                { return m.lastErr }
 func (m ExecModel) CdRequested() bool         { return m.cdRequested }
 func (m ExecModel) ShouldReturnToRecap() bool { return m.returnToRecap }
 func (m *ExecModel) ConsumeReturnToRecap()    { m.returnToRecap = false }
+
+func (m ExecModel) stopCommands() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+}
+
+// IsBusy reports whether steps or the cleanup are still running; quitting at
+// that point would leave a half-created project behind.
+func (m ExecModel) IsBusy() bool {
+	return m.cleaningUp || (!m.done && !m.promptCD && !m.confirmCleanup && !m.ackPending)
+}
 
 func (m ExecModel) Init() tea.Cmd {
 	if len(m.steps) == 0 {
@@ -116,19 +161,30 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		return m, m.readOneResult()
 
 	case execAllDoneMsg:
+		m.stopCommands()
+		if m.installMode {
+			m.ackPending = true
+			return m, nil
+		}
 		m.promptCD = true
 		return m, nil
 
 	case execStepDoneMsg:
 		m.streamChan = nil
+		if m.aborted {
+			msg.err = errAborted
+		}
 		if msg.err != nil {
 			m.lastErr = msg.err
-			if m.targetDir == "" {
+			if m.targetDir == "" || !m.hasCreatedEntries() {
 				m.done = true
 				return m, nil
 			}
-			m.cleaningUp = true
-			return m, m.runCleanup()
+			// NOTE: late steps (push, remote…) can fail on a fully scaffolded
+			// project, so the user decides whether the created files are removed.
+			m.confirmCleanup = true
+			m.cleanupCursor = cleanupOptionKeep
+			return m, nil
 		}
 		m.current++
 		if m.current >= len(m.steps) {
@@ -145,6 +201,48 @@ func (m ExecModel) Update(msg tea.Msg) (ExecModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.IsBusy() && !m.cleaningUp {
+			switch msg.String() {
+			case "ctrl+c":
+				if !m.abortPending {
+					m.abortPending = true
+					break
+				}
+				m.abortPending = false
+				m.aborted = true
+				m.stopCommands()
+			case "esc":
+				m.abortPending = false
+			}
+			break
+		}
+		if m.ackPending {
+			switch msg.String() {
+			case "enter", " ", "esc":
+				m.ackPending = false
+				m.done = true
+			}
+			break
+		}
+		if m.confirmCleanup {
+			switch msg.String() {
+			case "up", "k", "left", "h":
+				m.cleanupCursor = cleanupOptionRemove
+			case "down", "j", "right", "l":
+				m.cleanupCursor = cleanupOptionKeep
+			case " ", "enter":
+				m.confirmCleanup = false
+				if m.cleanupCursor == cleanupOptionRemove {
+					m.cleaningUp = true
+					return m, m.runCleanup()
+				}
+				m.done = true
+			case "esc":
+				m.confirmCleanup = false
+				m.done = true
+			}
+			break
+		}
 		if m.promptCD {
 			if !m.shellWrapperActive {
 				// No wrapper: any key quits
@@ -191,8 +289,9 @@ func (m ExecModel) runCurrentStep() tea.Cmd {
 	case step.StreamFn != nil:
 		ch := make(chan streamResult, 64)
 		fn := step.StreamFn
+		ctx := m.ctx
 		go func() {
-			err := fn(func(line string) {
+			err := fn(ctx, func(line string) {
 				ch <- streamResult{line: line}
 			})
 			ch <- streamResult{done: true, err: err}
@@ -235,6 +334,28 @@ func (m *ExecModel) appendLine(line string) {
 	}
 }
 
+// hasCreatedEntries reports whether the failed run left anything behind that
+// did not exist before kapi started.
+func (m ExecModel) hasCreatedEntries() bool {
+	entries, err := os.ReadDir(m.targetDir)
+	if err != nil {
+		return false
+	}
+	if !m.dirExistedBefore {
+		return true
+	}
+	pre := make(map[string]struct{}, len(m.preDirEntries))
+	for _, name := range m.preDirEntries {
+		pre[name] = struct{}{}
+	}
+	for _, e := range entries {
+		if _, ok := pre[e.Name()]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (m ExecModel) runCleanup() tea.Cmd {
 	targetDir := m.targetDir
 	existedBefore := m.dirExistedBefore
@@ -256,26 +377,15 @@ func cleanupPartial(targetDir string, preDirEntries []string) error {
 		pre[name] = struct{}{}
 	}
 
-	alwaysRemove := map[string]struct{}{
-		"node_modules":      {},
-		"vendor":            {},
-		"composer.lock":     {},
-		"package-lock.json": {},
-		"yarn.lock":         {},
-		"pnpm-lock.yaml":    {},
-		"bun.lock":          {},
-		".git":              {},
-	}
-
 	entries, err := os.ReadDir(targetDir)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		name := e.Name()
-		_, wasAlreadyThere := pre[name]
-		_, alwaysDel := alwaysRemove[name]
-		if !wasAlreadyThere || alwaysDel {
+		// NOTE: entries that existed before kapi ran (.git, vendor, lockfiles…)
+		// belong to the user and must never be deleted by a rollback.
+		if _, wasAlreadyThere := pre[name]; !wasAlreadyThere {
 			if removeErr := os.RemoveAll(filepath.Join(targetDir, name)); removeErr != nil && err == nil {
 				err = removeErr
 			}
@@ -308,9 +418,35 @@ func (m ExecModel) View() string {
 	switch {
 	case m.cleaningUp:
 		sb.WriteString(styles.MutedStyle.Render("  Cleaning up...") + "\n")
+	case m.confirmCleanup:
+		sb.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  ✗ Error: %s", m.lastErr)) + "\n")
+		sb.WriteString("\n")
+		sb.WriteString(styles.MutedStyle.Render("  What should kapi do with the files it created in "+truncatePath(m.targetDir)+"?") + "\n")
+		cleanupOpts := []string{"remove created files", "keep files"}
+		var optStr strings.Builder
+		for i, opt := range cleanupOpts {
+			if i > 0 {
+				optStr.WriteString(styles.DimStyle.Render("  ·  "))
+			}
+			if i == m.cleanupCursor {
+				optStr.WriteString(styles.SelectedStyle.Render(opt))
+			} else {
+				optStr.WriteString(styles.DimStyle.Render(opt))
+			}
+		}
+		fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("  ❯❯"), "  "+optStr.String())
+		sb.WriteString("\n")
+		sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm   [esc] keep files") + "\n")
 	case m.done && m.lastErr != nil:
 		sb.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("  ✗ Error: %s", m.lastErr)) + "\n")
-		sb.WriteString(styles.MutedStyle.Render("  [↵] back to summary") + "\n")
+		if m.installMode {
+			sb.WriteString(styles.MutedStyle.Render("  [↵] back to packages") + "\n")
+		} else {
+			sb.WriteString(styles.MutedStyle.Render("  [↵] back to summary") + "\n")
+		}
+	case m.ackPending:
+		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
+		sb.WriteString(styles.MutedStyle.Render("  [↵] back to menu") + "\n")
 	case m.promptCD:
 		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
 		sb.WriteString("\n")
@@ -327,17 +463,22 @@ func (m ExecModel) View() string {
 					optStr.WriteString(styles.DimStyle.Render(opt))
 				}
 			}
-				fmt.Fprintf(&sb, "%s%s\n", 
-					styles.CursorStyle.Render("  ❯❯"), 
-					styles.SelectedStyle.Render("  ")+optStr.String(), 
-				)
+			fmt.Fprintf(&sb, "%s%s\n",
+				styles.CursorStyle.Render("  ❯❯"),
+				styles.SelectedStyle.Render("  ")+optStr.String(),
+			)
 			sb.WriteString("\n")
 			sb.WriteString(styles.MutedStyle.Render("  [←→] navigate   [space / ↵] confirm") + "\n")
 		} else {
+			sb.WriteString(styles.DimStyle.Render("  Tip: set up `kapi shell-init` to cd into new projects automatically.") + "\n")
 			sb.WriteString(styles.MutedStyle.Render("  [↵] quit") + "\n")
 		}
 	case m.done:
 		sb.WriteString(styles.SuccessStyle.Render(fmt.Sprintf("  All %d steps completed.", len(m.steps))) + "\n")
+	case m.aborted:
+		sb.WriteString(styles.MutedStyle.Render("  Aborting…") + "\n")
+	case m.abortPending:
+		sb.WriteString(styles.ErrorStyle.Render("  Press ctrl+c again to abort, esc to continue") + "\n")
 	default:
 		sb.WriteString(styles.DimStyle.Render(fmt.Sprintf("  Step %d / %d", m.current+1, len(m.steps))) + "\n")
 	}
@@ -376,10 +517,7 @@ func (m ExecModel) renderOutputPanel() string {
 	inner := panelWidth - 2
 	rendered := make([]string, len(lines))
 	for i, l := range lines {
-		if len(l) > inner {
-			l = l[:inner-1] + "…"
-		}
-		rendered[i] = l
+		rendered[i] = fitOutputLine(l, inner)
 	}
 
 	box := lipgloss.NewStyle().
@@ -392,4 +530,14 @@ func (m ExecModel) renderOutputPanel() string {
 	indent := strings.Repeat(" ", hMargin)
 	indented := strings.ReplaceAll(box, "\n", "\n"+indent)
 	return indent + indented
+}
+
+// fitOutputLine keeps what a terminal would show for a command output line
+// (the text after the last carriage return) and truncates it to width by
+// display cells, without splitting multi-byte characters or ANSI sequences.
+func fitOutputLine(line string, width int) string {
+	if i := strings.LastIndexByte(line, '\r'); i >= 0 {
+		line = line[i+1:]
+	}
+	return ansi.Truncate(line, width, "…")
 }

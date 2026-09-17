@@ -5,15 +5,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/slouowzee/kapi/internal/semver"
 )
 
-const (
-	CurrentVersion   = "v1.2.0-beta.1"
-	githubReleaseURL = "https://api.github.com/repos/slouowzee/kapi/releases/latest"
-)
+const githubReleaseURL = "https://api.github.com/repos/slouowzee/kapi/releases/latest"
+
+// version is injected at release time:
+//
+//	-ldflags "-X github.com/slouowzee/kapi/internal/updater.version=v1.2.3"
+var version string
+
+// CurrentVersion is the running version: the injected one, else the module
+// version recorded by `go install`/`go build`, else "dev".
+var CurrentVersion = resolveVersion(version, readBuildVersion())
+
+func readBuildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return info.Main.Version
+}
+
+func resolveVersion(injected, build string) string {
+	if injected != "" {
+		return injected
+	}
+	if build != "" && build != "(devel)" {
+		return build
+	}
+	return "dev"
+}
 
 type Release struct {
 	TagName string `json:"tag_name"`

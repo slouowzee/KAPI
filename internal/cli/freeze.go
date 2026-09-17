@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -26,19 +27,7 @@ func HandleFreeze(args []string) {
 		return
 	}
 
-	var name, version string
-	lastIdx := strings.LastIndex(arg, "/")
-	if lastIdx != -1 {
-		maybeVer := arg[lastIdx+1:]
-		if len(maybeVer) > 0 && (maybeVer[0] >= '0' && maybeVer[0] <= '9' || maybeVer[0] == 'v') {
-			name = arg[:lastIdx]
-			version = maybeVer
-		} else {
-			name = arg
-		}
-	} else {
-		name = arg
-	}
+	name, version := parseFreezeArg(arg)
 
 	fmt.Printf("Searching for package '%s'...\n", name)
 
@@ -77,37 +66,15 @@ func HandleFreeze(args []string) {
 
 	note := promptNote()
 
-	cfg, err := config.Load()
+	err := config.Update(func(cfg *config.Config) error {
+		cfg.SetFrozen(registryName, config.FreezeVersionPackage{
+			Name:    pkg.Name,
+			Version: version,
+			Note:    note,
+		})
+		return nil
+	})
 	if err != nil {
-		fmt.Printf("Error loading configuration: %v\n", err)
-		os.Exit(1)
-	}
-
-	if cfg.FreezeVersionPackages == nil {
-		cfg.FreezeVersionPackages = make(map[string][]config.FreezeVersionPackage)
-	}
-
-	freezePkg := config.FreezeVersionPackage{
-		Name:    pkg.Name,
-		Version: version,
-		Note:    note,
-	}
-
-	exists := false
-	for i, f := range cfg.FreezeVersionPackages[registryName] {
-		if f.Name == pkg.Name {
-			cfg.FreezeVersionPackages[registryName][i].Version = version
-			cfg.FreezeVersionPackages[registryName][i].Note = note
-			exists = true
-			break
-		}
-	}
-
-	if !exists {
-		cfg.FreezeVersionPackages[registryName] = append(cfg.FreezeVersionPackages[registryName], freezePkg)
-	}
-
-	if err := config.Save(cfg); err != nil {
 		fmt.Printf("Error saving configuration: %v\n", err)
 		os.Exit(1)
 	}
@@ -115,10 +82,27 @@ func HandleFreeze(args []string) {
 	fmt.Printf("Package %s version %s successfully cached in config.json\n", pkg.Name, version)
 }
 
+// versionSuffixRe matches what can follow the last "/" or "@" as a version:
+// 1, 1.2.3, v2.0.0-beta.1… but not package segments such as var-dumper or volt.
+var versionSuffixRe = regexp.MustCompile(`^v?\d+(\.\d+)*([-+][0-9A-Za-z.-]+)?$`)
+
+// parseFreezeArg splits "<package>[@<version>]" or "<package>[/<version>]"
+// into a package name and an optional version.
+func parseFreezeArg(arg string) (name, version string) {
+	if i := strings.LastIndex(arg, "@"); i > 0 {
+		return arg[:i], arg[i+1:]
+	}
+	if i := strings.LastIndex(arg, "/"); i != -1 && versionSuffixRe.MatchString(arg[i+1:]) {
+		return arg[:i], arg[i+1:]
+	}
+	return arg, ""
+}
+
 func printFreezeHelp() {
 	PrintLogoAndTitle("Freeze")
 	fmt.Println("  " + styles.MutedStyle.Render("Usage:"))
-	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <package>[/<version>]") + "  Freezes the version of a package to prevent it from being updated.")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <package>[@<version>]") + "  Freezes the version of a package to prevent it from being updated.")
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi freeze <package>[/<version>]") + "  Same as above, kept for compatibility.")
 	fmt.Println()
 }
 
@@ -167,13 +151,14 @@ func listFrozen() {
 }
 
 func findExactPackage(ctx context.Context, name string) (*packages.Package, string) {
-	res := packages.FetchDefaults(ctx, []string{name}, false)
-	if len(res) > 0 && len(res[0].Versions) > 0 {
-		return &res[0], "npm"
-	}
-	res = packages.FetchDefaults(ctx, []string{name}, true)
-	if len(res) > 0 && len(res[0].Versions) > 0 {
-		return &res[0], "packagist"
+	for _, reg := range []struct {
+		name  string
+		isPhp bool
+	}{{"npm", false}, {"packagist", true}} {
+		versions, err := packages.FetchVersions(ctx, name, reg.isPhp)
+		if err == nil && len(versions) > 0 {
+			return &packages.Package{Name: name, Versions: versions}, reg.name
+		}
 	}
 	return nil, ""
 }
@@ -188,30 +173,40 @@ func fuzzySearchPackage(ctx context.Context, query string) (*packages.Package, s
 	packagistRes, _ := packages.SearchPackagist(ctx, query)
 
 	for i := 0; i < len(npmRes) && i < 25; i++ {
-		if len(npmRes[i].Versions) > 0 {
-			results = append(results, struct {
-				pkg packages.Package
-				reg string
-			}{npmRes[i], "npm"})
-		}
+		results = append(results, struct {
+			pkg packages.Package
+			reg string
+		}{npmRes[i], "npm"})
 	}
 	for i := 0; i < len(packagistRes) && i < 25; i++ {
-		if len(packagistRes[i].Versions) > 0 {
-			results = append(results, struct {
-				pkg packages.Package
-				reg string
-			}{packagistRes[i], "packagist"})
-		}
+		results = append(results, struct {
+			pkg packages.Package
+			reg string
+		}{packagistRes[i], "packagist"})
 	}
 
 	if len(results) == 0 {
 		return nil, ""
 	}
 
-	if len(results) == 1 {
-		return &results[0].pkg, results[0].reg
+	choice := 0
+	if len(results) > 1 {
+		choice = promptPackageChoice(results)
 	}
+	selected := results[choice]
 
+	versions, err := packages.FetchVersions(ctx, selected.pkg.Name, selected.reg == "packagist")
+	if err != nil || len(versions) == 0 {
+		return nil, ""
+	}
+	selected.pkg.Versions = versions
+	return &selected.pkg, selected.reg
+}
+
+func promptPackageChoice(results []struct {
+	pkg packages.Package
+	reg string
+}) int {
 	var choices []string
 	for _, r := range results {
 		desc := r.pkg.Description
@@ -225,7 +220,7 @@ func fuzzySearchPackage(ctx context.Context, query string) (*packages.Package, s
 	if err != nil {
 		os.Exit(1)
 	}
-	return &results[choice].pkg, results[choice].reg
+	return choice
 }
 
 func promptForVersion(pkg *packages.Package) string {

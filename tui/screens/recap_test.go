@@ -1,8 +1,14 @@
 package screens
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/slouowzee/kapi/internal/packagemanager"
+	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/scaffold"
 )
 
 func gitValue(cfg GitConfig) string {
@@ -133,11 +139,23 @@ func TestGitValue_ExistingGit_WithRemote(t *testing.T) {
 	}
 }
 
-func TestGitValue_ExistingGit_NoRemote_IsNone(t *testing.T) {
-	cfg := GitConfig{HasExistingGit: true, RemoteHost: ""}
-	got := gitValue(cfg)
-	if got != "none" {
-		t.Errorf("gitValue() = %q, want none when only HasExistingGit and no remote", got)
+func TestGitValue_WithoutNewRepo(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  GitConfig
+		want string
+	}{
+		{name: "existing repo is reported", cfg: GitConfig{HasExistingGit: true}, want: "local"},
+		{name: "collab and ci without repo", cfg: GitConfig{Collab: true, CI: ciChoiceGitHub}, want: "collab  ·  github CI"},
+		{name: "commit option ignored without init", cfg: GitConfig{InitialCommit: true, UniversalGitignore: true, CI: ciChoiceNone}, want: "none"},
+		{name: "commit option ignored on existing repo", cfg: GitConfig{HasExistingGit: true, InitialCommit: true}, want: "local"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := gitValue(tt.cfg); got != tt.want {
+				t.Errorf("gitValue() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -146,5 +164,84 @@ func TestGitValue_UniversalGitignore(t *testing.T) {
 	got := gitValue(cfg)
 	if !strings.Contains(got, "universal gitignore") {
 		t.Errorf("gitValue() = %q, want to contain 'universal gitignore'", got)
+	}
+}
+
+func TestRecap_PreflightGatesConfirm(t *testing.T) {
+	tests := []struct {
+		name     string
+		issues   []scaffold.Issue
+		checked  bool
+		wantDone bool
+	}{
+		{name: "still checking", checked: false, wantDone: false},
+		{name: "no issues", checked: true, wantDone: true},
+		{name: "warnings only", checked: true, issues: []scaffold.Issue{{Message: "dir not empty"}}, wantDone: true},
+		{name: "blocking issue", checked: true, issues: []scaffold.Issue{{Blocking: true, Message: "composer missing"}}, wantDone: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewRecap(80, 24, RecapSummary{Dir: "/tmp/my-app", Framework: registry.Framework{ID: "laravel", Ecosystem: "php"}})
+			if tt.checked {
+				m, _ = m.Update(preflightDoneMsg{issues: tt.issues})
+			}
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if updated.Done() != tt.wantDone {
+				t.Errorf("Done() = %v, want %v", updated.Done(), tt.wantDone)
+			}
+			for _, issue := range tt.issues {
+				if !strings.Contains(updated.View(), issue.Message) {
+					t.Errorf("issue %q is not displayed", issue.Message)
+				}
+			}
+		})
+	}
+}
+
+func TestRecap_InitRunsPreflight(t *testing.T) {
+	orig := runPreflight
+	t.Cleanup(func() { runPreflight = orig })
+	var gotDir string
+	runPreflight = func(_ context.Context, dir string, _ registry.Framework, _ GitConfig, _ packagemanager.PM, _ bool) []scaffold.Issue {
+		gotDir = dir
+		return []scaffold.Issue{{Blocking: true, Message: "boom"}}
+	}
+
+	m := NewRecap(80, 24, RecapSummary{Dir: "/tmp/my-app"})
+	m, _ = m.Update(m.Init()())
+
+	if gotDir != "/tmp/my-app" || m.CanScaffold() {
+		t.Errorf("preflight not applied: dir=%q canScaffold=%v", gotDir, m.CanScaffold())
+	}
+}
+
+func TestGitValue_GithubHTTPS(t *testing.T) {
+	got := gitValue(GitConfig{InitLocal: true, RemoteHost: "github", RemotePrivate: true, RemoteHTTPS: true, RepoName: "repo"})
+	if !strings.Contains(got, "github (private, https): repo") {
+		t.Errorf("gitValue() = %q, want the https protocol shown", got)
+	}
+}
+
+func TestRecap_CursorReachesAbandon(t *testing.T) {
+	for _, eco := range []string{"php", "js"} {
+		t.Run(eco, func(t *testing.T) {
+			m := NewRecap(80, 24, RecapSummary{Framework: registry.Framework{ID: "x", Ecosystem: eco}})
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+			if RecapSection(m.cursor) != RECAP_SECTION_ABANDON {
+				t.Errorf("cursor = %d, want RECAP_SECTION_ABANDON", m.cursor)
+			}
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if !m.IsAbandonPending() {
+				t.Error("enter on abandon should ask for confirmation")
+			}
+		})
+	}
+}
+
+func TestRecap_PHPSkipsPackageManagerRow(t *testing.T) {
+	m := NewRecap(80, 24, RecapSummary{Framework: registry.Framework{ID: "laravel", Ecosystem: "php"}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if RecapSection(m.cursor) != RECAP_SECTION_GIT {
+		t.Errorf("cursor = %d, want RECAP_SECTION_GIT (package manager row skipped)", m.cursor)
 	}
 }

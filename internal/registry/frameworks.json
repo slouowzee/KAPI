@@ -2,6 +2,7 @@
   "frameworks": [
     {
       "id": "laravel",
+      "detect": ["laravel/framework"],
       "name": "Laravel",
       "ecosystem": "php",
       "description": "The PHP framework for web artisans",
@@ -11,6 +12,7 @@
     },
     {
       "id": "symfony",
+      "detect": ["symfony/framework-bundle"],
       "name": "Symfony",
       "ecosystem": "php",
       "description": "High performance PHP framework for web applications",
@@ -20,6 +22,7 @@
     },
     {
       "id": "slim",
+      "detect": ["slim/slim"],
       "name": "Slim",
       "ecosystem": "php",
       "description": "Micro framework for simple yet powerful web applications and APIs",
@@ -28,16 +31,8 @@
       "github_repo": "slimphp/Slim"
     },
     {
-      "id": "lumen",
-      "name": "Lumen",
-      "ecosystem": "php",
-      "description": "The stunningly fast micro-framework by Laravel",
-      "tags": ["micro", "api", "rest", "laravel"],
-      "packagist_package": "laravel/lumen",
-      "github_repo": "laravel/lumen"
-    },
-    {
       "id": "codeigniter",
+      "detect": ["codeigniter4/framework"],
       "name": "CodeIgniter",
       "ecosystem": "php",
       "description": "Powerful PHP framework with a very small footprint",
@@ -47,6 +42,7 @@
     },
     {
       "id": "yii",
+      "detect": ["yiisoft/yii2"],
       "name": "Yii",
       "ecosystem": "php",
       "description": "Fast, secure and efficient PHP framework",
@@ -56,6 +52,7 @@
     },
     {
       "id": "wordpress",
+      "detect": ["roots/wordpress|johnpbloch/wordpress"],
       "name": "WordPress",
       "ecosystem": "php",
       "description": "The world's most popular CMS and blogging platform",
@@ -65,6 +62,7 @@
     },
     {
       "id": "drupal",
+      "detect": ["drupal/core-recommended|drupal/core"],
       "name": "Drupal",
       "ecosystem": "php",
       "description": "Open source CMS for ambitious digital experiences",
@@ -74,6 +72,7 @@
     },
     {
       "id": "cakephp",
+      "detect": ["cakephp/cakephp"],
       "name": "CakePHP",
       "ecosystem": "php",
       "description": "Rapid development framework for PHP with a proven track record",
@@ -83,6 +82,7 @@
     },
     {
       "id": "laminas",
+      "detect": ["laminas/laminas-mvc"],
       "name": "Laminas",
       "ecosystem": "php",
       "description": "Enterprise-grade components and MVC framework, successor to Zend Framework",
@@ -92,6 +92,7 @@
     },
     {
       "id": "phalcon",
+      "detect": ["phalcon/phalcon|phalcon/ide-stubs"],
       "name": "Phalcon",
       "ecosystem": "php",
       "description": "High performance PHP framework delivered as a C extension",
@@ -101,6 +102,7 @@
     },
     {
       "id": "fuelphp",
+      "detect": ["fuel/core"],
       "name": "FuelPHP",
       "ecosystem": "php",
       "description": "Simple, flexible, community-driven PHP framework with HMVC support",
@@ -110,6 +112,7 @@
     },
     {
       "id": "leafphp",
+      "detect": ["leafs/leaf"],
       "name": "Leaf PHP",
       "ecosystem": "php",
       "description": "Simple, lightweight and expressive PHP micro-framework",
@@ -119,6 +122,7 @@
     },
     {
       "id": "api-platform",
+      "detect": ["api-platform/core", "symfony/framework-bundle"],
       "name": "API Platform",
       "ecosystem": "php",
       "description": "REST and GraphQL framework to build API-first projects, built on Symfony",
@@ -136,6 +140,7 @@
     },
     {
       "id": "nextjs",
+      "detect": ["next"],
       "name": "Next.js",
       "ecosystem": "js",
       "type": "framework",
@@ -147,6 +152,7 @@
     },
     {
       "id": "nuxt",
+      "detect": ["nuxt"],
       "name": "Nuxt",
       "ecosystem": "js",
       "type": "framework",
@@ -158,6 +164,7 @@
     },
     {
       "id": "remix",
+      "detect": ["@remix-run/react"],
       "name": "Remix",
       "ecosystem": "js",
       "type": "framework",
@@ -169,6 +176,7 @@
     },
     {
       "id": "tanstack-start",
+      "detect": ["@tanstack/react-start"],
       "name": "TanStack Start",
       "ecosystem": "js",
       "type": "framework",
@@ -180,6 +188,7 @@
     },
     {
       "id": "astro",
+      "detect": ["astro"],
       "name": "Astro",
       "ecosystem": "js",
       "type": "framework",
@@ -191,6 +200,7 @@
     },
     {
       "id": "gatsby",
+      "detect": ["gatsby"],
       "name": "Gatsby",
       "ecosystem": "js",
       "type": "framework",
@@ -202,6 +212,7 @@
     },
     {
       "id": "sveltekit",
+      "detect": ["@sveltejs/kit"],
       "name": "SvelteKit",
       "ecosystem": "js",
       "type": "framework",
@@ -213,6 +224,7 @@
     },
     {
       "id": "analog",
+      "detect": ["@analogjs/platform"],
       "name": "Analog",
       "ecosystem": "js",
       "type": "framework",
@@ -224,6 +236,7 @@
     },
     {
       "id": "react-vite",
+      "detect": ["react", "vite"],
       "name": "React",
       "ecosystem": "js",
       "type": "library",
@@ -234,6 +247,7 @@
     },
     {
       "id": "vue-vite",
+      "detect": ["vue", "vite"],
       "name": "Vue",
       "ecosystem": "js",
       "type": "library",
@@ -244,6 +258,7 @@
     },
     {
       "id": "svelte-vite",
+      "detect": ["svelte", "vite"],
       "name": "Svelte",
       "ecosystem": "js",
       "type": "library",
@@ -254,6 +269,7 @@
     },
     {
       "id": "vanilla-vite",
+      "detect": ["vite"],
       "name": "Vanilla",
       "ecosystem": "js",
       "type": "library",
@@ -264,6 +280,7 @@
     },
     {
       "id": "express",
+      "detect": ["express"],
       "name": "Express",
       "ecosystem": "js",
       "description": "Fast, unopinionated, minimalist web framework for Node.js",
@@ -273,6 +290,7 @@
     },
     {
       "id": "fastify",
+      "detect": ["fastify"],
       "name": "Fastify",
       "ecosystem": "js",
       "description": "Fast and low overhead web framework for Node.js",
@@ -282,6 +300,7 @@
     },
     {
       "id": "nestjs",
+      "detect": ["@nestjs/core"],
       "name": "NestJS",
       "ecosystem": "js",
       "description": "A progressive Node.js framework for scalable server-side applications",
@@ -291,6 +310,7 @@
     },
     {
       "id": "hono",
+      "detect": ["hono"],
       "name": "Hono",
       "ecosystem": "js",
       "description": "Ultrafast web framework for the Edges",
@@ -301,6 +321,7 @@
     },
     {
       "id": "react-native",
+      "detect": ["react-native"],
       "name": "React Native",
       "ecosystem": "js",
       "description": "Build native mobile apps using React",
@@ -311,6 +332,7 @@
     },
     {
       "id": "expo",
+      "detect": ["expo", "react-native"],
       "name": "Expo",
       "ecosystem": "js",
       "description": "An open-source platform for making universal native apps with React",

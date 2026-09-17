@@ -54,7 +54,10 @@ type FrameworkModel struct {
 	loading bool
 	loadErr error
 
-	statsCache map[string]trends.Stats
+	// statsCache holds loaded trends; statsPending marks a framework whose
+	// trends were already requested so cursor movement does not refetch it.
+	statsCache   map[string]trends.Stats
+	statsPending map[string]bool
 
 	selected registry.Framework
 	done     bool
@@ -68,12 +71,13 @@ func NewFramework(width, height int, eco ecosystem.Ecosystem, targetDir string) 
 		ecoStr = "js"
 	}
 	return FrameworkModel{
-		width:      width,
-		height:     height,
-		ecosystem:  ecoStr,
-		targetDir:  targetDir,
-		loading:    true,
-		statsCache: make(map[string]trends.Stats),
+		width:        width,
+		height:       height,
+		ecosystem:    ecoStr,
+		targetDir:    targetDir,
+		loading:      true,
+		statsCache:   make(map[string]trends.Stats),
+		statsPending: make(map[string]bool),
 	}
 }
 
@@ -101,6 +105,36 @@ func (m FrameworkModel) currentFramework() (registry.Framework, bool) {
 }
 
 func (m FrameworkModel) Update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
+	m, cmd := m.update(msg)
+	if trendsCmd := m.requestFocusedTrends(); trendsCmd != nil {
+		return m, tea.Batch(cmd, trendsCmd)
+	}
+	return m, cmd
+}
+
+// requestFocusedTrends fetches trends for the framework under the cursor,
+// once: eagerly fetching every framework in the list would mean downloading
+// packagist/npm stats and a GitHub stars call for all of them on every visit,
+// which alone can exhaust the unauthenticated GitHub rate limit.
+func (m *FrameworkModel) requestFocusedTrends() tea.Cmd {
+	fw, ok := m.currentFramework()
+	if !ok {
+		return nil
+	}
+	if _, cached := m.statsCache[fw.ID]; cached {
+		return nil
+	}
+	if m.statsPending[fw.ID] {
+		return nil
+	}
+	if m.statsPending == nil {
+		m.statsPending = make(map[string]bool)
+	}
+	m.statsPending[fw.ID] = true
+	return loadTrendsCmd(fw)
+}
+
+func (m FrameworkModel) update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -120,15 +154,11 @@ func (m FrameworkModel) Update(msg tea.Msg) (FrameworkModel, tea.Cmd) {
 		}
 		m.visible = m.all
 		m.cursor = 0
-		if len(m.all) > 0 {
-			cmds := make([]tea.Cmd, len(m.all))
-			for i, fw := range m.all {
-				cmds[i] = loadTrendsCmd(fw)
-			}
-			return m, tea.Batch(cmds...)
-		}
 
 	case trendsLoadedMsg:
+		if m.statsCache == nil {
+			m.statsCache = make(map[string]trends.Stats)
+		}
 		m.statsCache[msg.frameworkID] = msg.stats
 
 	case tea.KeyMsg:

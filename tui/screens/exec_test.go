@@ -1,11 +1,15 @@
 package screens
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestCleanupPartial_RemovesNewEntries(t *testing.T) {
@@ -34,7 +38,43 @@ func TestCleanupPartial_RemovesNewEntries(t *testing.T) {
 	}
 }
 
-func TestCleanupPartial_AlwaysRemovesNodeModules(t *testing.T) {
+func TestCleanupPartial_KeepsPreexistingEntries(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+		isDir bool
+	}{
+		{name: "git repository", entry: ".git", isDir: true},
+		{name: "node modules", entry: "node_modules", isDir: true},
+		{name: "vendor", entry: "vendor", isDir: true},
+		{name: "composer lockfile", entry: "composer.lock"},
+		{name: "npm lockfile", entry: "package-lock.json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tt.entry)
+			if tt.isDir {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := cleanupPartial(dir, []string{tt.entry}); err != nil {
+				t.Fatalf("cleanupPartial returned error: %v", err)
+			}
+
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("%s existed before scaffolding and was removed", tt.entry)
+			}
+		})
+	}
+}
+
+func TestCleanupPartial_RemovesNewDependencyDirs(t *testing.T) {
 	dir := t.TempDir()
 
 	nm := filepath.Join(dir, "node_modules")
@@ -42,31 +82,12 @@ func TestCleanupPartial_AlwaysRemovesNodeModules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pre := []string{"node_modules"}
-	if err := cleanupPartial(dir, pre); err != nil {
+	if err := cleanupPartial(dir, []string{"README.md"}); err != nil {
 		t.Fatalf("cleanupPartial returned error: %v", err)
 	}
 
 	if _, err := os.Stat(nm); err == nil {
-		t.Error("node_modules still exists, expected it to be removed")
-	}
-}
-
-func TestCleanupPartial_AlwaysRemovesDotGit(t *testing.T) {
-	dir := t.TempDir()
-
-	dotGit := filepath.Join(dir, ".git")
-	if err := os.Mkdir(dotGit, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	pre := []string{".git"}
-	if err := cleanupPartial(dir, pre); err != nil {
-		t.Fatalf("cleanupPartial returned error: %v", err)
-	}
-
-	if _, err := os.Stat(dotGit); err == nil {
-		t.Error(".git still exists, expected it to be removed")
+		t.Error("node_modules was created by the scaffold and should have been removed")
 	}
 }
 
@@ -373,5 +394,204 @@ func TestExecUpdate_PromptCD_LKeyNavigatesDown(t *testing.T) {
 	m = sendKey(m, "l")
 	if m.cdCursor != 1 {
 		t.Errorf("'l' should move cursor to 1, got %d", m.cdCursor)
+	}
+}
+
+func newFailedExecModel(t *testing.T, existedBefore bool) (ExecModel, string) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "app")
+	if existedBefore {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := NewExec(80, 24, []ExecStep{{Label: "step1", Fn: func() error { return nil }}}, dir)
+	return m, dir
+}
+
+func TestExecUpdate_StepError_AsksBeforeCleanup(t *testing.T) {
+	m, dir := newFailedExecModel(t, false)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, cmd := m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+	if !updated.confirmCleanup {
+		t.Fatal("confirmCleanup should be true after a failed step that created files")
+	}
+	if updated.cleaningUp || cmd != nil {
+		t.Error("cleanup must not start before the user confirms")
+	}
+	if updated.cleanupCursor != cleanupOptionKeep {
+		t.Errorf("default choice should keep files, got %d", updated.cleanupCursor)
+	}
+}
+
+func TestExecUpdate_StepError_NothingCreated_Done(t *testing.T) {
+	m, _ := newFailedExecModel(t, false)
+
+	updated, _ := m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+	if updated.confirmCleanup {
+		t.Error("confirmCleanup should be false when nothing was created")
+	}
+	if !updated.done || !updated.HasErr() {
+		t.Error("model should be done with an error")
+	}
+}
+
+func TestExecUpdate_ConfirmCleanup(t *testing.T) {
+	tests := []struct {
+		name        string
+		keys        []string
+		wantRemoved bool
+	}{
+		{name: "remove created files", keys: []string{"left", "enter"}, wantRemoved: true},
+		{name: "keep files with enter", keys: []string{"enter"}, wantRemoved: false},
+		{name: "keep files with esc", keys: []string{"left", "esc"}, wantRemoved: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, dir := newFailedExecModel(t, true)
+			created := filepath.Join(dir, "created.txt")
+			if err := os.WriteFile(created, []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			m, _ = m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+			var cmd tea.Cmd
+			for _, k := range tt.keys {
+				msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+				switch k {
+				case "left":
+					msg = tea.KeyMsg{Type: tea.KeyLeft}
+				case "enter":
+					msg = tea.KeyMsg{Type: tea.KeyEnter}
+				case "esc":
+					msg = tea.KeyMsg{Type: tea.KeyEsc}
+				}
+				m, cmd = m.Update(msg)
+			}
+			if cmd != nil {
+				m, _ = m.Update(cmd())
+			}
+
+			_, err := os.Stat(created)
+			if removed := os.IsNotExist(err); removed != tt.wantRemoved {
+				t.Errorf("created file removed = %v, want %v", removed, tt.wantRemoved)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "keep.txt")); err != nil {
+				t.Error("pre-existing file must always be kept")
+			}
+			if !m.done {
+				t.Error("model should be done after the cleanup choice")
+			}
+		})
+	}
+}
+
+func ctrlC() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyCtrlC} }
+
+func TestExecUpdate_AbortNeedsConfirmation(t *testing.T) {
+	m := NewExec(80, 24, []ExecStep{{Label: "step1", Fn: func() error { return nil }}}, "")
+
+	m, _ = m.Update(ctrlC())
+	if !m.abortPending || m.aborted {
+		t.Fatalf("first ctrl+c should only ask for confirmation (pending=%v aborted=%v)", m.abortPending, m.aborted)
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.abortPending {
+		t.Fatal("esc should cancel the pending abort")
+	}
+
+	m, _ = m.Update(ctrlC())
+	m, _ = m.Update(ctrlC())
+	if !m.aborted {
+		t.Fatal("second ctrl+c should abort")
+	}
+	if m.ctx.Err() == nil {
+		t.Error("aborting should cancel the running commands")
+	}
+
+	m, _ = m.Update(execStepDoneMsg{})
+	if !errors.Is(m.Err(), errAborted) {
+		t.Errorf("Err() = %v, want errAborted even if the step succeeded", m.Err())
+	}
+	if m.IsBusy() {
+		t.Error("model should not be busy after the abort")
+	}
+}
+
+func TestExecUpdate_QIgnoredWhileBusy(t *testing.T) {
+	m := NewExec(80, 24, []ExecStep{{Label: "step1", Fn: func() error { return nil }}}, "")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if m.done || m.abortPending {
+		t.Error("q must not stop a running scaffold")
+	}
+}
+
+func TestFitOutputLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		width int
+		want  string
+	}{
+		{name: "short line unchanged", line: "added 12 packages", width: 40, want: "added 12 packages"},
+		{name: "ascii truncated", line: "abcdefghij", width: 5, want: "abcd…"},
+		{name: "multi-byte characters stay valid", line: "ééééééééé", width: 5, want: "éééé…"},
+		{name: "carriage return keeps last update", line: "progress 10%\rprogress 90%\rdone", width: 40, want: "done"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fitOutputLine(tt.line, tt.width)
+			if got != tt.want {
+				t.Errorf("fitOutputLine(%q, %d) = %q, want %q", tt.line, tt.width, got, tt.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("result %q is not valid UTF-8", got)
+			}
+		})
+	}
+}
+
+func TestFitOutputLine_KeepsANSISequencesIntact(t *testing.T) {
+	line := "\x1b[32m" + strings.Repeat("x", 50) + "\x1b[0m"
+	got := fitOutputLine(line, 10)
+	if w := ansi.StringWidth(got); w > 10 {
+		t.Errorf("display width = %d, want <= 10", w)
+	}
+	if !strings.HasPrefix(got, "\x1b[32m") {
+		t.Errorf("color sequence was cut: %q", got)
+	}
+}
+
+func TestInstallExec_WaitsForAcknowledgement(t *testing.T) {
+	m := NewInstallExec(80, 24, []ExecStep{{Label: "npm install zod", Fn: func() error { return nil }}})
+
+	m, _ = m.Update(execAllDoneMsg{})
+	if m.promptCD || m.Done() || m.IsBusy() {
+		t.Fatalf("install mode should wait for the user (promptCD=%v done=%v busy=%v)", m.promptCD, m.Done(), m.IsBusy())
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.Done() || m.HasErr() {
+		t.Error("enter should acknowledge the install")
+	}
+}
+
+func TestInstallExec_FailureNeverCleansUp(t *testing.T) {
+	m := NewInstallExec(80, 24, []ExecStep{{Label: "npm install zod", Fn: func() error { return nil }}})
+
+	m, _ = m.Update(execStepDoneMsg{err: os.ErrPermission})
+
+	if m.confirmCleanup || m.cleaningUp || !m.Done() {
+		t.Error("installing into an existing project must never offer to remove files")
 	}
 }
