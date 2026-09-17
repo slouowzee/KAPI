@@ -16,6 +16,7 @@ const (
 	GITCFG_STEP_MENU
 	GITCFG_STEP_REMOTE_MENU
 	GITCFG_STEP_REMOTE_NAME_INPUT
+	GITCFG_STEP_REMOTE_PROTOCOL
 	GITCFG_STEP_REMOTE_INPUT
 	GITCFG_STEP_COLLAB_DETECTING
 	GITCFG_STEP_COLLAB_CHECKLIST
@@ -402,6 +403,19 @@ func (m GitConfigModel) View() string {
 		sb.WriteString("    > " + renderTextInput(m.remoteRepoName, m.remoteNamePos) + "\n")
 		sb.WriteString("\n")
 		sb.WriteString(styles.MutedStyle.Render("  [enter] confirm   [esc] back   [ctrl+c] quit") + "\n")
+
+	case GITCFG_STEP_REMOTE_PROTOCOL:
+		sb.WriteString(styles.SelectedStyle.Render("  Remote protocol for "+m.remoteRepoName+":") + "\n")
+		protoOpts := []string{"SSH", "HTTPS"}
+		for i, opt := range protoOpts {
+			if i == m.remoteProtocolCursor {
+				fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("    ❯❯ "), styles.SelectedStyle.Render(opt))
+			} else {
+				fmt.Fprintf(&sb, "       %s\n", styles.DimStyle.Render(opt))
+			}
+		}
+		sb.WriteString("\n")
+		sb.WriteString(styles.MutedStyle.Render("  [←→] choose   [enter] confirm   [esc] back   [ctrl+c] quit") + "\n")
 
 	case GITCFG_STEP_REMOTE_INPUT:
 		sb.WriteString(styles.SelectedStyle.Render("  Enter remote URL (SSH or HTTPS):") + "\n")

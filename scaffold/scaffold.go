@@ -1,28 +1,30 @@
 package scaffold
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/gitconfig"
+	"github.com/slouowzee/kapi/internal/github"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
 )
 
+// Step is one scaffolding action. StreamFn must stop its command when ctx is
+// cancelled, which happens when the user aborts.
 type Step struct {
 	Label    string
 	Cmd      *exec.Cmd
 	Fn       func() error
-	StreamFn func(onLine func(string)) error
+	StreamFn func(ctx context.Context, onLine func(string)) error
 }
 
 func Plan(
@@ -34,30 +36,37 @@ func Plan(
 ) []Step {
 	var steps []Step
 
+	if fw.Ecosystem == "js" && pm == packagemanager.None {
+		pm = packagemanager.NPM
+	}
+
 	steps = append(steps, frameworkSteps(targetDir, fw, pm)...)
 
 	if len(selectedPkgs) > 0 {
 		steps = append(steps, packageSteps(targetDir, fw, selectedPkgs, pm)...)
 	}
 
-	if gitCfg.InitLocal && !gitCfg.HasExistingGit {
-		if gitCfg.InitialCommit {
+	newRepo := gitCfg.InitLocal && !gitCfg.HasExistingGit
+	hasRepo := newRepo || gitCfg.HasExistingGit
+	hasCommit := gitCfg.HasExistingGit || (newRepo && gitCfg.InitialCommit)
+
+	if newRepo {
+		steps = append(steps, Step{
+			Label:    "git init",
+			StreamFn: streamCmd(targetDir, "git", "init"),
+		})
+		if gitCfg.UniversalGitignore {
 			steps = append(steps, Step{
-				Label:    "git init",
-				StreamFn: streamCmd(targetDir, "git", "init"),
+				Label: "merge universal .gitignore",
+				Fn:    mergeGitignoreFn(targetDir, universalGitignore),
 			})
-			if gitCfg.UniversalGitignore {
-				steps = append(steps, Step{
-					Label: "write universal .gitignore",
-					Fn:    writeFileFn(targetDir, ".gitignore", universalGitignore),
-				})
-			}
-			steps = append(steps, initialCommitStep(targetDir))
 		}
 	}
 
+	// NOTE: generated files are written before the initial commit so that
+	// they end up in the pushed history.
 	if gitCfg.Collab {
-		steps = append(steps, collabSteps(targetDir)...)
+		steps = append(steps, collabFileSteps(targetDir)...)
 	}
 
 	switch gitCfg.CI {
@@ -67,12 +76,39 @@ func Plan(
 		steps = append(steps, ciGitlabStep(targetDir, fw, pm))
 	}
 
-	steps = append(steps, remoteSteps(targetDir, gitCfg)...)
+	if newRepo && gitCfg.InitialCommit {
+		steps = append(steps, initialCommitStep(targetDir))
+	}
+
+	if !hasRepo {
+		return steps
+	}
+
+	remote := remoteSteps(targetDir, gitCfg)
+	steps = append(steps, remote...)
+
+	// NOTE: dev is created after the default branch has been pushed, otherwise
+	// only dev would reach the remote and become its default branch.
+	if gitCfg.Collab && hasCommit {
+		steps = append(steps, devBranchStep(targetDir))
+		if len(remote) > 0 {
+			steps = append(steps, Step{
+				Label:    "git push -u origin dev",
+				StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "dev"),
+			})
+		}
+	}
 
 	return steps
 }
 
 func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
+	if gitCfg.HasExistingRemote {
+		return nil
+	}
+	// NOTE: a freshly initialised repository without a commit has nothing to
+	// push, so the remote is only registered.
+	hasCommit := gitCfg.InitialCommit || gitCfg.HasExistingGit
 	switch gitCfg.RemoteHost {
 	case "github":
 		name := gitCfg.RepoName
@@ -80,53 +116,63 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 			name = filepath.Base(targetDir)
 		}
 		private := gitCfg.RemotePrivate
-		sshURL := new(string)
+		remoteURL := new(string)
 
 		visibility := "public"
 		if private {
 			visibility = "private"
 		}
 
-		return []Step{
+		steps := []Step{
 			{
 				Label: "create " + visibility + " GitHub repo: " + name,
 				Fn: func() error {
 					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 					defer cancel()
-					url, err := createGithubRepo(ctx, name, private)
+					repo, err := github.CreateRepo(ctx, config.GithubToken(), name, private)
 					if err != nil {
 						return err
 					}
-					*sshURL = url
+					*remoteURL = repo.SSHURL
+					if gitCfg.RemoteHTTPS {
+						*remoteURL = repo.CloneURL
+					}
 					return nil
 				},
 			},
 			{
 				Label: "git remote add origin <github url>",
 				Fn: func() error {
-					return gitSilentCmd(targetDir, "remote", "add", "origin", *sshURL).Run()
+					return gitSilentCmd(targetDir, "remote", "add", "origin", *remoteURL).Run()
 				},
 			},
-			{
-				Label:    "git push -u origin HEAD",
-				StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "HEAD"),
-			},
 		}
+		if hasCommit {
+			steps = append(steps, pushStep(targetDir))
+		}
+		return steps
 
 	default:
 		if gitCfg.RemoteURL == "" {
 			return nil
 		}
-		return []Step{
+		steps := []Step{
 			{
 				Label:    "git remote add origin " + gitCfg.RemoteURL,
 				StreamFn: streamGitCmd(targetDir, "remote", "add", "origin", gitCfg.RemoteURL),
 			},
-			{
-				Label:    "git push -u origin HEAD",
-				StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "HEAD"),
-			},
 		}
+		if hasCommit {
+			steps = append(steps, pushStep(targetDir))
+		}
+		return steps
+	}
+}
+
+func pushStep(targetDir string) Step {
+	return Step{
+		Label:    "git push -u origin HEAD",
+		StreamFn: streamGitCmd(targetDir, "push", "-u", "origin", "HEAD"),
 	}
 }
 
@@ -149,11 +195,6 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 		return []Step{{
 			Label:    "composer create-project slim/slim-skeleton " + name,
 			StreamFn: streamCmd(parent, "composer", "create-project", "slim/slim-skeleton", name),
-		}}
-	case "lumen":
-		return []Step{{
-			Label:    "composer create-project laravel/lumen " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "laravel/lumen", name),
 		}}
 	case "codeigniter":
 		return []Step{{
@@ -183,9 +224,12 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			StreamFn: streamCmd(parent, "composer", "create-project", "laminas/laminas-mvc-skeleton", name),
 		}}
 	case "phalcon":
+		// NOTE: phalcon/phalcon is the framework library, not installable as a
+		// project skeleton; Phalcon has no blank starter, so invo (their own
+		// getting-started tutorial app) is the closest official entry point.
 		return []Step{{
-			Label:    "composer create-project phalcon/phalcon " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "phalcon/phalcon", name),
+			Label:    "composer create-project phalcon/invo " + name,
+			StreamFn: streamCmd(parent, "composer", "create-project", "phalcon/invo", name),
 		}}
 	case "fuelphp":
 		return []Step{{
@@ -193,20 +237,21 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			StreamFn: streamCmd(parent, "composer", "create-project", "fuel/fuel", name),
 		}}
 	case "leafphp":
+		// NOTE: leafs/leaf is the framework library; leafs/mvc is the actual
+		// project skeleton with the MVC structure and routing set up.
 		return []Step{{
-			Label:    "composer create-project leafs/leaf " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "leafs/leaf", name),
+			Label:    "composer create-project leafs/mvc " + name,
+			StreamFn: streamCmd(parent, "composer", "create-project", "leafs/mvc", name),
 		}}
 	case "api-platform":
-		return []Step{{
-			Label:    "composer create-project api-platform/api-platform " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "api-platform/api-platform", name),
-		}}
+		return apiPlatformSteps(targetDir, name, parent)
 	case "vanilla-php":
-		return vanillaPhpSteps(targetDir, name, parent)
+		return vanillaPhpSteps(targetDir, name)
 
 	case "nextjs":
-		return jsExecStep(parent, pm, "create-next-app@latest", name)
+		// NOTE: the flag keeps the chosen package manager when the initializer
+		// is run through npx (e.g. Yarn 1 fallback).
+		return jsExecStep(parent, pm, "create-next-app@latest", name, "--use-"+pm.CacheKey())
 	case "nuxt":
 		return jsExecStep(parent, pm, "nuxi@latest", "init", name)
 	case "remix":
@@ -214,7 +259,7 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 	case "tanstack-start":
 		return jsExecStep(parent, pm, "create-tsrouter-app@latest", name, "--framework", "react", "--add-ons", "start")
 	case "astro":
-		return jsExecStep(parent, pm, "astro@latest", name)
+		return jsCreateStep(parent, pm, "astro@latest", name)
 	case "gatsby":
 		return jsExecStep(parent, pm, "gatsby", "new", name)
 	case "sveltekit":
@@ -222,18 +267,18 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 	case "analog":
 		return jsExecStep(parent, pm, "create-nx-workspace@latest", name, "--preset=@analogjs/platform")
 	case "hono":
-		return jsExecStep(parent, pm, "hono@latest", name)
+		return jsCreateStep(parent, pm, "hono@latest", name)
 	case "react-native":
 		return jsExecStep(parent, pm, "@react-native-community/cli@latest", "init", name)
 
 	case "react-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "react-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "react-ts")...)
 	case "vue-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "vue-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "vue-ts")...)
 	case "svelte-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "svelte-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "svelte-ts")...)
 	case "vanilla-vite":
-		return jsCreateStreamStep(parent, pm, "vite@latest", name, "--", "--template", "vanilla-ts")
+		return jsCreateStreamStep(parent, pm, "vite@latest", viteArgs(pm, name, "vanilla-ts")...)
 	case "express":
 		return jsExecStreamStep(parent, pm, "express-generator", name)
 	case "fastify":
@@ -245,14 +290,38 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 	default:
 	}
 
-	return []Step{{
-		Label:    "mkdir " + targetDir,
-		StreamFn: streamCmd("", "mkdir", "-p", targetDir),
-	}}
+	return []Step{mkdirStep(targetDir)}
+}
+
+// mkdirStep creates a directory natively: `mkdir -p` does not exist on Windows.
+func mkdirStep(dir string) Step {
+	return Step{
+		Label: "mkdir " + dir,
+		Fn:    func() error { return os.MkdirAll(dir, 0o755) },
+	}
+}
+
+// viteArgs builds create-vite arguments. Only npm needs the extra `--` to
+// forward flags; other package managers would pass it through and make
+// create-vite ignore the template.
+func viteArgs(pm packagemanager.PM, name, template string) []string {
+	args := []string{name}
+	if pm == packagemanager.NPM || pm == packagemanager.None {
+		args = append(args, "--")
+	}
+	// NOTE: streamed steps have no stdin, so prompts must be disabled.
+	return append(args, "--template", template, "--no-interactive")
 }
 
 func jsExecStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
 	argv := append(append([]string(nil), pm.ExecArgs()...), pkg)
+	argv = append(argv, extra...)
+	return []Step{{Label: strings.Join(argv, " "), Cmd: cmdSlice(dir, argv)}}
+}
+
+// jsCreateStep runs an interactive `<pm> create <pkg>` initializer.
+func jsCreateStep(dir string, pm packagemanager.PM, pkg string, extra ...string) []Step {
+	argv := append(append([]string(nil), pm.CreateArgs()...), pkg)
 	argv = append(argv, extra...)
 	return []Step{{Label: strings.Join(argv, " "), Cmd: cmdSlice(dir, argv)}}
 }
@@ -276,17 +345,43 @@ func wordpressSteps(name, parent string) []Step {
 	}}
 }
 
-func vanillaPhpSteps(targetDir, name, parent string) []Step {
+func vanillaPhpComposerName(folder string) string {
+	part := composerPackageName(folder)
+	return part + "/" + part
+}
+
+// apiPlatformSteps installs API Platform as a Symfony pack: api-platform/api-platform
+// (the old standalone distribution) is abandoned in favor of requiring the pack
+// into a fresh Symfony skeleton.
+func apiPlatformSteps(targetDir, name, parent string) []Step {
 	return []Step{
 		{
-			Label:    "mkdir " + name,
-			StreamFn: streamCmd(parent, "mkdir", "-p", name),
+			Label:    "composer create-project symfony/skeleton " + name,
+			StreamFn: streamCmd(parent, "composer", "create-project", "symfony/skeleton", name),
 		},
 		{
-			Label:    "composer init (in " + name + ")",
-			StreamFn: streamCmd(targetDir, "composer", "init", "--no-interaction", "--name="+name+"/"+name),
+			Label:    "composer require api-platform/api-pack",
+			StreamFn: streamCmd(targetDir, "composer", "require", "api-platform/api-pack"),
 		},
 	}
+}
+
+func vanillaPhpSteps(targetDir, name string) []Step {
+	return []Step{
+		mkdirStep(targetDir),
+		{
+			Label:    "composer init (in " + name + ")",
+			StreamFn: streamCmd(targetDir, "composer", "init", "--no-interaction", "--name="+vanillaPhpComposerName(name)),
+		},
+	}
+}
+
+// InstallPlan returns the steps adding packages to an existing project.
+func InstallPlan(dir string, fw registry.Framework, pkgs []packages.Package, pm packagemanager.PM) []Step {
+	if fw.Ecosystem == "js" && pm == packagemanager.None {
+		pm = packagemanager.NPM
+	}
+	return packageSteps(dir, fw, pkgs, pm)
 }
 
 func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Package, pm packagemanager.PM) []Step {
@@ -337,12 +432,22 @@ func packageSteps(targetDir string, fw registry.Framework, pkgs []packages.Packa
 	return steps
 }
 
-func collabSteps(targetDir string) []Step {
-	return []Step{
-		{
-			Label:    "create dev branch",
-			StreamFn: streamGitCmd(targetDir, "checkout", "-b", "dev"),
+func devBranchStep(targetDir string) Step {
+	return Step{
+		Label: "create dev branch",
+		Fn: func() error {
+			// NOTE: an existing repository may already have a dev branch; it is
+			// left untouched rather than reset.
+			if gitSilentCmd(targetDir, "rev-parse", "--verify", "--quiet", "refs/heads/dev").Run() == nil {
+				return nil
+			}
+			return gitSilentCmd(targetDir, "checkout", "-b", "dev").Run()
 		},
+	}
+}
+
+func collabFileSteps(targetDir string) []Step {
+	return []Step{
 		{
 			Label: "write CONTRIBUTING.md",
 			Fn:    writeFileFn(targetDir, "CONTRIBUTING.md", contributingMd),
@@ -403,65 +508,61 @@ func gitSilentCmd(targetDir string, args ...string) *exec.Cmd {
 	return c
 }
 
-func streamCmd(dir string, name string, args ...string) func(onLine func(string)) error {
-	return func(onLine func(string)) error {
-		c := exec.Command(name, args...)
+type streamFunc = func(ctx context.Context, onLine func(string)) error
+
+// maxOutputLine bounds a single streamed output line (progress bars may emit
+// very long lines without newlines).
+const maxOutputLine = 1024 * 1024
+
+// abortGracePeriod is how long a command gets to exit after being signalled,
+// and how long its output is still read once it has exited, before its pipes
+// are forcibly closed. It is a variable so tests can shorten it.
+var abortGracePeriod = 5 * time.Second
+
+func streamCmd(dir string, name string, args ...string) streamFunc {
+	return func(ctx context.Context, onLine func(string)) error {
+		c := exec.CommandContext(ctx, name, args...)
 		if dir != "" {
 			c.Dir = dir
 		}
+		configureCancel(c)
+		c.WaitDelay = abortGracePeriod
 		return runStreamed(c, onLine)
 	}
 }
 
-func streamCmdSlice(dir string, argv []string) func(onLine func(string)) error {
+func streamCmdSlice(dir string, argv []string) streamFunc {
 	if len(argv) == 0 {
-		return func(onLine func(string)) error { return nil }
+		return func(context.Context, func(string)) error { return nil }
 	}
 	return streamCmd(dir, argv[0], argv[1:]...)
 }
 
-func streamGitCmd(targetDir string, args ...string) func(onLine func(string)) error {
+func streamGitCmd(targetDir string, args ...string) streamFunc {
 	return streamCmd(targetDir, "git", args...)
 }
 
 func runStreamed(c *exec.Cmd, onLine func(string)) error {
-	stdout, err := c.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := c.StderrPipe()
-	if err != nil {
-		return err
+	w := &lineWriter{onLine: onLine, maxLine: maxOutputLine}
+	c.Stdout = w
+	c.Stderr = w
+	if c.WaitDelay == 0 {
+		c.WaitDelay = abortGracePeriod
 	}
 	if err := c.Start(); err != nil {
 		return err
 	}
+	untrack := trackRunning(c)
+	defer untrack()
 
-	lines := make(chan string)
-	var wg sync.WaitGroup
-
-	scanPipe := func(r io.Reader) {
-		defer wg.Done()
-		s := bufio.NewScanner(r)
-		for s.Scan() {
-			lines <- s.Text()
-		}
+	err := c.Wait()
+	w.flush()
+	// NOTE: ErrWaitDelay means the command succeeded but a background process
+	// it started kept the output open; the step itself is done.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil
 	}
-
-	wg.Add(2)
-	go scanPipe(stdout)
-	go scanPipe(stderr)
-
-	go func() {
-		wg.Wait()
-		close(lines)
-	}()
-
-	for line := range lines {
-		onLine(line)
-	}
-
-	return c.Wait()
+	return err
 }
 
 func initialCommitStep(targetDir string) Step {
@@ -496,6 +597,53 @@ func writeFileFn(targetDir, relPath, content string) func() error {
 			return err
 		}
 		return os.WriteFile(fullPath, []byte(content), 0o644)
+	}
+}
+
+// mergeGitignoreFn appends the universal rules that are missing from the
+// framework's own .gitignore instead of replacing it, so framework-specific
+// rules (storage keys, secrets, build dirs…) are preserved.
+func mergeGitignoreFn(targetDir, universal string) func() error {
+	return func() error {
+		path := filepath.Join(targetDir, ".gitignore")
+		existing, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return os.WriteFile(path, []byte(universal), 0o644)
+		}
+		if err != nil {
+			return fmt.Errorf("read .gitignore: %w", err)
+		}
+
+		present := make(map[string]struct{})
+		for _, line := range strings.Split(string(existing), "\n") {
+			present[strings.TrimSpace(line)] = struct{}{}
+		}
+
+		var missing []string
+		for _, line := range strings.Split(universal, "\n") {
+			rule := strings.TrimSpace(line)
+			if rule == "" || strings.HasPrefix(rule, "#") {
+				continue
+			}
+			if _, ok := present[rule]; ok {
+				continue
+			}
+			present[rule] = struct{}{}
+			missing = append(missing, rule)
+		}
+		if len(missing) == 0 {
+			return nil
+		}
+
+		var sb strings.Builder
+		sb.Write(existing)
+		if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n# Added by kapi\n")
+		sb.WriteString(strings.Join(missing, "\n"))
+		sb.WriteString("\n")
+		return os.WriteFile(path, []byte(sb.String()), 0o644)
 	}
 }
 
@@ -659,7 +807,7 @@ jobs:
       - run: composer install --prefer-dist --no-progress
 `
 	switch fwID {
-	case "laravel", "lumen":
+	case "laravel":
 		return header +
 			"      - run: cp .env.example .env\n" +
 			"      - run: php artisan key:generate\n" +
@@ -675,9 +823,13 @@ jobs:
 		return header
 	default:
 		return header +
-			"      - run: composer test\n"
+			"      - run: " + composerTestIfPresent + "\n"
 	}
 }
+
+// composerTestIfPresent runs `composer test` only when the skeleton defines
+// that script; several skeletons (Drupal, Yii…) ship without one.
+const composerTestIfPresent = `if composer run-script --list | grep -qE '^[[:space:]]+test([[:space:]]|$)'; then composer test; else echo "No composer test script, skipping"; fi`
 
 func gitlabCI(fw registry.Framework, pm packagemanager.PM) string {
 	if fw.Ecosystem == "php" {
@@ -727,7 +879,7 @@ test:
     - composer install --prefer-dist --no-progress
 `
 	switch fwID {
-	case "laravel", "lumen":
+	case "laravel":
 		return header +
 			"    - cp .env.example .env\n" +
 			"    - php artisan key:generate\n" +
@@ -749,6 +901,6 @@ test:
 	default:
 		return header +
 			"  script:\n" +
-			"    - composer test\n"
+			"    - " + composerTestIfPresent + "\n"
 	}
 }

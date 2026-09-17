@@ -3,10 +3,15 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/slouowzee/kapi/internal/testutil"
@@ -29,6 +34,9 @@ func setupTempHome(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	orig := ghTokenLookup
+	ghTokenLookup = func() string { return "" }
+	t.Cleanup(func() { ghTokenLookup = orig })
 	return tmp
 }
 
@@ -232,7 +240,7 @@ func TestFetchTokenScopes_AllScopes(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "valid-token")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-OAuth-Scopes", "repo, write:public_key, write:gpg_key")
+		w.Header().Set("X-OAuth-Scopes", "repo, write:ssh_signing_key, write:gpg_key")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
@@ -243,7 +251,7 @@ func TestFetchTokenScopes_AllScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchTokenScopes() unexpected error: %v", err)
 	}
-	want := TokenScopes{Repo: true, WritePublicKey: true, WriteGPGKey: true}
+	want := TokenScopes{Repo: true, WriteSSHSigningKey: true, WriteGPGKey: true}
 	if got != want {
 		t.Errorf("FetchTokenScopes() = %+v, want %+v", got, want)
 	}
@@ -254,7 +262,7 @@ func TestFetchTokenScopes_AdminScopeAliases(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "valid-token")
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-OAuth-Scopes", "admin:public_key, admin:gpg_key")
+		w.Header().Set("X-OAuth-Scopes", "admin:ssh_signing_key, admin:gpg_key")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("{}"))
 	}))
@@ -265,7 +273,7 @@ func TestFetchTokenScopes_AdminScopeAliases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchTokenScopes() unexpected error: %v", err)
 	}
-	if !got.WritePublicKey || !got.WriteGPGKey {
+	if !got.WriteSSHSigningKey || !got.WriteGPGKey {
 		t.Errorf("admin:* alias not recognised: %+v", got)
 	}
 }
@@ -345,5 +353,209 @@ func TestFetchTokenScopes_BearerAuth(t *testing.T) {
 	}
 	if want := "Bearer " + tok; gotAuth != want {
 		t.Errorf("Authorization header = %q, want %q", gotAuth, want)
+	}
+}
+
+func TestUpdate_ConcurrentUpdatesAreNotLost(t *testing.T) {
+	setupTempHome(t)
+
+	const n = 30
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := Update(func(cfg *Config) error {
+				if cfg.Favorites == nil {
+					cfg.Favorites = make(map[string][]FavoritePackage)
+				}
+				cfg.Favorites["nextjs"] = append(cfg.Favorites["nextjs"], FavoritePackage{Name: fmt.Sprintf("pkg-%d", i)})
+				return nil
+			})
+			if err != nil {
+				t.Errorf("Update: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cfg.Favorites["nextjs"]); got != n {
+		t.Errorf("got %d favorites, want %d", got, n)
+	}
+}
+
+func TestUpdate_UnreadableConfigIsNotOverwritten(t *testing.T) {
+	home := setupTempHome(t)
+	path := filepath.Join(home, ".config", "kapi", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const corrupt = `{"github_token": "keep-me",`
+	if err := os.WriteFile(path, []byte(corrupt), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	err := Update(func(cfg *Config) error {
+		called = true
+		return nil
+	})
+
+	if err == nil {
+		t.Error("expected an error for an unreadable config")
+	}
+	if called {
+		t.Error("fn must not run when the config cannot be loaded")
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != corrupt {
+		t.Errorf("config was modified: %q", data)
+	}
+}
+
+func TestUpdate_FnErrorSkipsSave(t *testing.T) {
+	setupTempHome(t)
+	if err := Save(Config{PackageManager: "bun"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantErr := errors.New("abort")
+	err := Update(func(cfg *Config) error {
+		cfg.PackageManager = "npm"
+		return wantErr
+	})
+
+	if !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+	cfg, _ := Load()
+	if cfg.PackageManager != "bun" {
+		t.Errorf("PackageManager = %q, want bun (unchanged)", cfg.PackageManager)
+	}
+}
+
+func TestSave_LeavesNoTemporaryFiles(t *testing.T) {
+	home := setupTempHome(t)
+	for i := 0; i < 3; i++ {
+		if err := Save(Config{PackageManager: "npm"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(home, ".config", "kapi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	// The lock file is kept on purpose: removing it would race with other
+	// processes waiting on it.
+	if !slices.Equal(names, []string{"config.json", "config.json.lock"}) {
+		t.Errorf("config dir contains %v, want only config.json and its lock", names)
+	}
+}
+
+func TestConfig_SetAndRemoveFrozen(t *testing.T) {
+	var cfg Config
+	cfg.SetFrozen("npm", FreezeVersionPackage{Name: "react", Version: "18.0.0"})
+	cfg.SetFrozen("npm", FreezeVersionPackage{Name: "vue", Version: "3.0.0"})
+	cfg.SetFrozen("npm", FreezeVersionPackage{Name: "react", Version: "19.0.0", Note: "bump"})
+	cfg.SetFrozen("packagist", FreezeVersionPackage{Name: "laravel/framework", Version: "11.0.0"})
+
+	if got := cfg.FreezeVersionPackages["npm"]; len(got) != 2 || got[0].Version != "19.0.0" || got[0].Note != "bump" {
+		t.Fatalf("SetFrozen should replace existing entries, got %+v", got)
+	}
+
+	tests := []struct {
+		name     string
+		registry string
+		pkg      string
+		want     bool
+	}{
+		{name: "wrong registry", registry: "packagist", pkg: "vue", want: false},
+		{name: "any registry", registry: "", pkg: "vue", want: true},
+		{name: "already removed", registry: "", pkg: "vue", want: false},
+		{name: "last of registry", registry: "packagist", pkg: "laravel/framework", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cfg.RemoveFrozen(tt.registry, tt.pkg); got != tt.want {
+				t.Errorf("RemoveFrozen(%q, %q) = %v, want %v", tt.registry, tt.pkg, got, tt.want)
+			}
+		})
+	}
+
+	if _, ok := cfg.FreezeVersionPackages["packagist"]; ok {
+		t.Error("empty registry should be deleted")
+	}
+	if got := cfg.FreezeVersionPackages["npm"]; len(got) != 1 || got[0].Name != "react" {
+		t.Errorf("npm registry = %+v, want only react", got)
+	}
+}
+
+func TestGithubToken_FallsBackToGhCLI(t *testing.T) {
+	setupTempHome(t)
+	t.Setenv("GITHUB_TOKEN", "")
+	ghTokenLookup = func() string { return "gh-token" }
+
+	if got := GithubToken(); got != "gh-token" {
+		t.Errorf("GithubToken() = %q, want gh-token", got)
+	}
+}
+
+// TestConfigHelperProcess is not a real test: it is started as a separate
+// process by TestUpdate_ConcurrentProcessesAreNotLost.
+func TestConfigHelperProcess(t *testing.T) {
+	if os.Getenv("KAPI_CONFIG_HELPER") != "1" {
+		return
+	}
+	id := os.Getenv("KAPI_CONFIG_HELPER_ID")
+	for i := 0; i < 25; i++ {
+		err := Update(func(cfg *Config) error {
+			if cfg.Favorites == nil {
+				cfg.Favorites = make(map[string][]FavoritePackage)
+			}
+			cfg.Favorites["nextjs"] = append(cfg.Favorites["nextjs"], FavoritePackage{Name: fmt.Sprintf("%s-%d", id, i)})
+			return nil
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(0)
+}
+
+func TestUpdate_ConcurrentProcessesAreNotLost(t *testing.T) {
+	home := setupTempHome(t)
+
+	const processes = 4
+	cmds := make([]*exec.Cmd, processes)
+	for p := range cmds {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestConfigHelperProcess$")
+		cmd.Env = append(os.Environ(), "KAPI_CONFIG_HELPER=1", fmt.Sprintf("KAPI_CONFIG_HELPER_ID=%d", p), "HOME="+home)
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		cmds[p] = cmd
+	}
+	for _, cmd := range cmds {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("helper process failed: %v", err)
+		}
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cfg.Favorites["nextjs"]); got != processes*25 {
+		t.Errorf("got %d favorites, want %d: concurrent processes lost updates", got, processes*25)
 	}
 }
