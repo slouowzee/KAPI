@@ -150,17 +150,11 @@ func TestFetchPackagist_Success(t *testing.T) {
 	const pkg = "test-vendor/fetchpackagist-success"
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/packages/"+pkg+".json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/packages/"+pkg+"/stats.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"package": map[string]any{
-				"downloads": map[string]any{"total": int64(9999)},
-				"versions": map[string]any{
-					"v3.0.0":   map[string]string{"version": "v3.0.0"},
-					"v2.0.0":   map[string]string{"version": "v2.0.0"},
-					"dev-main": map[string]string{"version": "dev-main"},
-				},
-			},
+			"downloads": map[string]any{"total": int64(9999)},
+			"versions":  []string{"dev-main", "v3.0.0", "v2.0.0"},
 		})
 	})
 
@@ -304,12 +298,10 @@ func TestFetch_Packagist(t *testing.T) {
 	const repo = "test-owner/repo-fetch-packagist"
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/packages/"+pkg+".json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/packages/"+pkg+"/stats.json", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"package": map[string]any{
-				"downloads": map[string]any{"total": int64(400)},
-				"versions":  map[string]any{"v1.1.0": map[string]string{"version": "v1.1.0"}},
-			},
+			"downloads": map[string]any{"total": int64(400)},
+			"versions":  []string{"v1.1.0"},
 		})
 	})
 	mux.HandleFunc("/repos/"+repo, func(w http.ResponseWriter, r *http.Request) {
