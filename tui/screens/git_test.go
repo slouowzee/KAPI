@@ -66,6 +66,7 @@ func newDetectedGitModel() GitModel {
 		height:    24,
 		targetDir: "/home/user/myproject",
 		detecting: false,
+		initOpt:   gitInitYes,
 	}
 }
 
@@ -365,5 +366,107 @@ func TestIsInputMode(t *testing.T) {
 	m.urlEditing = true
 	if !m.IsInputMode() {
 		t.Error("IsInputMode should be true when urlEditing")
+	}
+}
+
+func TestGitModelConfig_DetectedRemote_IsExisting(t *testing.T) {
+	m := Git(80, 24, "/home/user/myproject", GitConfig{})
+	m, _ = m.Update(gitDetectionMsg{hasGit: true, remoteURL: "git@github.com:me/existing.git"})
+
+	cfg := m.Config()
+
+	if !cfg.HasExistingRemote {
+		t.Error("HasExistingRemote should be true when origin was detected")
+	}
+	if cfg.RemoteURL != "git@github.com:me/existing.git" {
+		t.Errorf("RemoteURL = %q, want the detected origin", cfg.RemoteURL)
+	}
+}
+
+func TestGitModel_NoRepo_DisablesRemote(t *testing.T) {
+	m := newDetectedGitModel()
+	m.initOpt = gitInitNo
+	m.remoteOpt = gitRemoteGithubPublic
+	m.repoNameInput = "repo"
+
+	if cfg := m.Config(); cfg.RemoteHost != "" || cfg.RepoName != "" {
+		t.Errorf("remote must be ignored without a local repo, got host=%q repo=%q", cfg.RemoteHost, cfg.RepoName)
+	}
+
+	m.cursor = gitFieldInit
+	m.moveCursor(1)
+	if m.cursor != gitFieldCollab {
+		t.Errorf("cursor = %d, want gitFieldCollab (%d) when remote is unavailable", m.cursor, gitFieldCollab)
+	}
+}
+
+func TestGit_InitialCommitOption(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  GitConfig
+		want bool
+	}{
+		{name: "fresh screen defaults to yes", cfg: GitConfig{}, want: true},
+		{name: "edit keeps yes", cfg: GitConfig{InitLocal: true, InitialCommit: true, CI: ciChoiceNone}, want: true},
+		{name: "edit keeps no", cfg: GitConfig{InitLocal: true, InitialCommit: false, CI: ciChoiceNone}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Git(80, 24, "/home/user/myproject", tt.cfg)
+			m.initOpt = gitInitYes
+			if got := m.Config().InitialCommit; got != tt.want {
+				t.Errorf("InitialCommit = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitModel_Protocol(t *testing.T) {
+	tests := []struct {
+		name      string
+		remoteOpt int
+		protocol  int
+		wantHTTPS bool
+	}{
+		{name: "github ssh", remoteOpt: gitRemoteGithubPrivate, protocol: gitProtocolSSH, wantHTTPS: false},
+		{name: "github https", remoteOpt: gitRemoteGithubPublic, protocol: gitProtocolHTTPS, wantHTTPS: true},
+		{name: "existing url ignores protocol", remoteOpt: gitRemoteExisting, protocol: gitProtocolHTTPS, wantHTTPS: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newDetectedGitModel()
+			m.remoteOpt = tt.remoteOpt
+			m.protocolOpt = tt.protocol
+			m.repoNameInput = "repo"
+
+			cfg := m.Config()
+			if cfg.RemoteHTTPS != tt.wantHTTPS {
+				t.Fatalf("RemoteHTTPS = %v, want %v", cfg.RemoteHTTPS, tt.wantHTTPS)
+			}
+			if tt.remoteOpt == gitRemoteExisting {
+				return
+			}
+			reopened := Git(80, 24, "/home/user/myproject", cfg)
+			if reopened.protocolOpt != tt.protocol || reopened.remoteOpt != tt.remoteOpt {
+				t.Errorf("reopened protocol=%d remote=%d, want %d/%d", reopened.protocolOpt, reopened.remoteOpt, tt.protocol, tt.remoteOpt)
+			}
+		})
+	}
+}
+
+func TestMoveCursor_ProtocolOnlyForGithub(t *testing.T) {
+	m := newDetectedGitModel()
+	m.cursor = gitFieldRepoName
+	m.remoteOpt = gitRemoteGithubPublic
+	m.moveCursor(1)
+	if m.cursor != gitFieldProtocol {
+		t.Errorf("cursor = %d, want gitFieldProtocol for a GitHub remote", m.cursor)
+	}
+
+	m.remoteOpt = gitRemoteExisting
+	m.cursor = gitFieldRemote
+	m.moveCursor(1)
+	if m.cursor != gitFieldURL {
+		t.Errorf("cursor = %d, want gitFieldURL for an existing URL", m.cursor)
 	}
 }

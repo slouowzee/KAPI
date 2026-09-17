@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/slouowzee/kapi/internal/ecosystem"
+	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/scaffold"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
@@ -261,6 +263,9 @@ func (m FolderModel) View() string {
 				fmt.Fprintf(&sb, "      %s\n", styles.DimStyle.Render(line))
 			}
 		}
+		if m.cursor == MENU_ITEM_CURRENT {
+			sb.WriteString(jsNameWarning(m.workDir))
+		}
 
 	case FOLDER_MODE_INPUT:
 		runes := []rune(m.input)
@@ -289,6 +294,7 @@ func (m FolderModel) View() string {
 			} else if m.input != "" {
 				sb.WriteString(styles.DimStyle.Render("  ↵ to use this path") + "\n")
 			}
+			sb.WriteString(jsNameWarning(path))
 		}
 
 		if len(m.suggestions) > 0 {
@@ -342,6 +348,15 @@ func (m *FolderModel) enterInputMode() {
 	m.sugCursor = 0
 	m.easterEggMsg = ""
 	m.dangerMsg = ""
+}
+
+// jsNameWarning warns early that JS initializers will reject the folder
+// name; PHP frameworks accept it, so the choice is not blocked here.
+func jsNameWarning(dir string) string {
+	if dir == "" || scaffold.ProjectNameError(registry.Framework{Ecosystem: "js"}, dir) == "" {
+		return ""
+	}
+	return styles.SubtitleStyle.Render("  ⚠ JS frameworks need a lowercase folder name (letters, digits, - _ .)") + "\n"
 }
 
 func expandPath(path string) string {

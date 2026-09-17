@@ -1,18 +1,24 @@
 package scaffold
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/slouowzee/kapi/internal/gitconfig"
 	"github.com/slouowzee/kapi/internal/packagemanager"
+	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
-	"github.com/slouowzee/kapi/tui/screens"
 )
 
 func TestRemoteSteps_GithubPrivate_UsesRepoName(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: true,
 		RepoName:      "my-awesome-repo",
@@ -28,7 +34,7 @@ func TestRemoteSteps_GithubPrivate_UsesRepoName(t *testing.T) {
 }
 
 func TestRemoteSteps_GithubPublic_UsesRepoName(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: false,
 		RepoName:      "public-lib",
@@ -44,7 +50,7 @@ func TestRemoteSteps_GithubPublic_UsesRepoName(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_FallsBackToDirBasename(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: true,
 		RepoName:      "",
@@ -60,7 +66,7 @@ func TestRemoteSteps_Github_FallsBackToDirBasename(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_PrivateLabel(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: true,
 		RepoName:      "repo",
@@ -73,7 +79,7 @@ func TestRemoteSteps_Github_PrivateLabel(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_PublicLabel(t *testing.T) {
-	cfg := screens.GitConfig{
+	cfg := gitconfig.GitConfig{
 		RemoteHost:    "github",
 		RemotePrivate: false,
 		RepoName:      "repo",
@@ -86,7 +92,7 @@ func TestRemoteSteps_Github_PublicLabel(t *testing.T) {
 }
 
 func TestRemoteSteps_Github_ReturnsThreeSteps(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "github", RepoName: "repo"}
+	cfg := gitconfig.GitConfig{RemoteHost: "github", RepoName: "repo", InitialCommit: true}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if len(steps) != 3 {
@@ -95,9 +101,10 @@ func TestRemoteSteps_Github_ReturnsThreeSteps(t *testing.T) {
 }
 
 func TestRemoteSteps_ExistingURL_ReturnsTwoSteps(t *testing.T) {
-	cfg := screens.GitConfig{
-		RemoteHost: "custom",
-		RemoteURL:  "git@mygit.internal:user/repo.git",
+	cfg := gitconfig.GitConfig{
+		RemoteHost:    "custom",
+		RemoteURL:     "git@mygit.internal:user/repo.git",
+		InitialCommit: true,
 	}
 	steps := remoteSteps("/tmp/proj", cfg)
 
@@ -108,7 +115,7 @@ func TestRemoteSteps_ExistingURL_ReturnsTwoSteps(t *testing.T) {
 
 func TestRemoteSteps_ExistingURL_ContainsURL(t *testing.T) {
 	const url = "git@mygit.internal:user/repo.git"
-	cfg := screens.GitConfig{RemoteHost: "custom", RemoteURL: url}
+	cfg := gitconfig.GitConfig{RemoteHost: "custom", RemoteURL: url}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if !strings.Contains(steps[0].Label, url) {
@@ -117,7 +124,7 @@ func TestRemoteSteps_ExistingURL_ContainsURL(t *testing.T) {
 }
 
 func TestRemoteSteps_NoRemote_ReturnsNil(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "", RemoteURL: ""}
+	cfg := gitconfig.GitConfig{RemoteHost: "", RemoteURL: ""}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if steps != nil {
@@ -126,7 +133,7 @@ func TestRemoteSteps_NoRemote_ReturnsNil(t *testing.T) {
 }
 
 func TestRemoteSteps_CustomHost_NoURL_ReturnsNil(t *testing.T) {
-	cfg := screens.GitConfig{RemoteHost: "custom", RemoteURL: ""}
+	cfg := gitconfig.GitConfig{RemoteHost: "custom", RemoteURL: ""}
 	steps := remoteSteps("/tmp/proj", cfg)
 
 	if steps != nil {
@@ -201,16 +208,6 @@ func TestGithubActionsCI_Laravel_HasEnvCopyAndKeyGenerate(t *testing.T) {
 	}
 }
 
-func TestGithubActionsCI_Lumen_HasEnvCopyAndKeyGenerate(t *testing.T) {
-	out := githubActionsCI(fw("lumen"), packagemanager.NPM)
-	if !strings.Contains(out, "cp .env.example .env") {
-		t.Error("lumen CI should contain 'cp .env.example .env'")
-	}
-	if !strings.Contains(out, "php artisan key:generate") {
-		t.Error("lumen CI should contain 'php artisan key:generate'")
-	}
-}
-
 func TestGithubActionsCI_Symfony_NoEnvCopy(t *testing.T) {
 	out := githubActionsCI(fw("symfony"), packagemanager.NPM)
 	if strings.Contains(out, ".env.example") {
@@ -270,8 +267,11 @@ func TestGithubActionsCI_VanillaPhp_NoTestStep(t *testing.T) {
 func TestGithubActionsCI_GenericPhp_ComposerTest(t *testing.T) {
 	for _, id := range []string{"slim", "yii", "cakephp", "laminas", "drupal", "phalcon", "fuelphp", "leafphp"} {
 		out := githubActionsCI(fw(id), packagemanager.NPM)
-		if !strings.Contains(out, "composer test") {
-			t.Errorf("%s CI should contain 'composer test'", id)
+		if !strings.Contains(out, composerTestIfPresent) {
+			t.Errorf("%s CI should only run 'composer test' when the script exists", id)
+		}
+		if gl := gitlabCI(fw(id), packagemanager.NPM); !strings.Contains(gl, composerTestIfPresent) {
+			t.Errorf("%s gitlab CI should only run 'composer test' when the script exists", id)
 		}
 		if strings.Contains(out, ".env.example") {
 			t.Errorf("%s CI must not reference .env.example", id)
@@ -338,13 +338,13 @@ func TestGithubActionsCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
 	}
 }
 
-func TestGithubActionsCI_JS_Yarn_UsesIfPresentBefore(t *testing.T) {
+func TestGithubActionsCI_JS_Yarn_GuardsMissingScripts(t *testing.T) {
 	out := githubActionsCI(jsfw("nuxt"), packagemanager.Yarn)
-	if !strings.Contains(out, "yarn run --if-present test") {
-		t.Errorf("yarn CI should contain 'yarn run --if-present test', got:\n%s", out)
+	if !strings.Contains(out, "then yarn run test; fi") {
+		t.Errorf("yarn CI should only run the test script when it exists, got:\n%s", out)
 	}
-	if strings.Contains(out, "yarn run test --if-present") {
-		t.Errorf("yarn CI must not put --if-present after script name, got:\n%s", out)
+	if strings.Contains(out, "--if-present") {
+		t.Errorf("yarn does not support --if-present, got:\n%s", out)
 	}
 }
 
@@ -359,5 +359,531 @@ func TestGitlabCI_JS_PNPM_UsesIfPresentBefore(t *testing.T) {
 	out := gitlabCI(jsfw("express"), packagemanager.PNPM)
 	if !strings.Contains(out, "pnpm run --if-present test") {
 		t.Errorf("pnpm gitlab CI should contain 'pnpm run --if-present test', got:\n%s", out)
+	}
+}
+
+func TestRemoteSteps_ExistingRemote_ReturnsNil(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  gitconfig.GitConfig
+	}{
+		{name: "github origin", cfg: gitconfig.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "github", RemoteURL: "git@github.com:me/app.git"}},
+		{name: "gitlab origin", cfg: gitconfig.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "gitlab", RemoteURL: "git@gitlab.com:me/app.git"}},
+		{name: "custom origin", cfg: gitconfig.GitConfig{HasExistingGit: true, HasExistingRemote: true, RemoteHost: "custom", RemoteURL: "git@mygit.internal:me/app.git"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if steps := remoteSteps("/tmp/proj", tt.cfg); steps != nil {
+				t.Errorf("expected no remote steps for an existing origin, got %d", len(steps))
+			}
+		})
+	}
+}
+
+func stepLabels(steps []Step) []string {
+	labels := make([]string, len(steps))
+	for i, s := range steps {
+		labels[i] = s.Label
+	}
+	return labels
+}
+
+func hasLabel(steps []Step, prefix string) bool {
+	for _, l := range stepLabels(steps) {
+		if strings.HasPrefix(l, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPlan_GitSteps(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       gitconfig.GitConfig
+		wantInit  bool
+		wantDev   bool
+		wantPush  bool
+		wantRepo  bool
+		wantFiles bool
+	}{
+		{
+			name:     "init without initial commit",
+			cfg:      gitconfig.GitConfig{InitLocal: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
+			wantInit: true, wantRepo: false, wantPush: false,
+		},
+		{
+			name:     "init with initial commit pushes",
+			cfg:      gitconfig.GitConfig{InitLocal: true, InitialCommit: true, RemoteHost: "custom", RemoteURL: "git@host:me/app.git"},
+			wantInit: true, wantPush: true,
+		},
+		{
+			name:      "no repo skips remote and dev branch",
+			cfg:       gitconfig.GitConfig{Collab: true, RemoteHost: "github", RepoName: "app"},
+			wantFiles: true,
+		},
+		{
+			name:      "collab with repo creates dev branch",
+			cfg:       gitconfig.GitConfig{InitLocal: true, InitialCommit: true, Collab: true},
+			wantInit:  true,
+			wantDev:   true,
+			wantFiles: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			steps := Plan("/tmp/x/app", fw("laravel"), nil, tt.cfg, packagemanager.None)
+			if got := hasLabel(steps, "git init"); got != tt.wantInit {
+				t.Errorf("git init present = %v, want %v (%v)", got, tt.wantInit, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "create dev branch"); got != tt.wantDev {
+				t.Errorf("dev branch present = %v, want %v (%v)", got, tt.wantDev, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "git push"); got != tt.wantPush {
+				t.Errorf("push present = %v, want %v (%v)", got, tt.wantPush, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "create public GitHub repo") || hasLabel(steps, "create private GitHub repo"); got != tt.wantRepo {
+				t.Errorf("github repo creation present = %v, want %v (%v)", got, tt.wantRepo, stepLabels(steps))
+			}
+			if got := hasLabel(steps, "write CONTRIBUTING.md"); got != tt.wantFiles {
+				t.Errorf("collab files present = %v, want %v (%v)", got, tt.wantFiles, stepLabels(steps))
+			}
+		})
+	}
+}
+
+func indexOfLabel(steps []Step, prefix string) int {
+	for i, l := range stepLabels(steps) {
+		if strings.HasPrefix(l, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestPlan_CollabAndCIAreCommittedBeforePush(t *testing.T) {
+	cfg := gitconfig.GitConfig{
+		InitLocal:     true,
+		InitialCommit: true,
+		Collab:        true,
+		CI:            "github",
+		RemoteHost:    "custom",
+		RemoteURL:     "git@host:me/app.git",
+	}
+	steps := Plan("/tmp/x/app", fw("laravel"), nil, cfg, packagemanager.None)
+
+	commit := indexOfLabel(steps, "git add -A")
+	order := []struct {
+		label  string
+		before bool
+	}{
+		{label: "write CONTRIBUTING.md", before: true},
+		{label: "write .github/workflows/ci.yml", before: true},
+		{label: "git push -u origin HEAD", before: false},
+		{label: "create dev branch", before: false},
+		{label: "git push -u origin dev", before: false},
+	}
+	for _, o := range order {
+		idx := indexOfLabel(steps, o.label)
+		if idx == -1 {
+			t.Errorf("missing step %q in %v", o.label, stepLabels(steps))
+			continue
+		}
+		if (idx < commit) != o.before {
+			t.Errorf("step %q at %d, initial commit at %d (before=%v)", o.label, idx, commit, o.before)
+		}
+	}
+	if indexOfLabel(steps, "git push -u origin HEAD") > indexOfLabel(steps, "create dev branch") {
+		t.Error("default branch must be pushed before dev is created")
+	}
+}
+
+func TestPlan_CollabWithoutRemote_NoDevPush(t *testing.T) {
+	cfg := gitconfig.GitConfig{InitLocal: true, InitialCommit: true, Collab: true}
+	steps := Plan("/tmp/x/app", fw("laravel"), nil, cfg, packagemanager.None)
+
+	if indexOfLabel(steps, "git push") != -1 {
+		t.Errorf("no push expected without remote, got %v", stepLabels(steps))
+	}
+}
+
+func TestDevBranchStep_KeepsExistingBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("commit", "-q", "--allow-empty", "-m", "init")
+	run("branch", "dev")
+
+	for i := 0; i < 2; i++ {
+		if err := devBranchStep(dir).Fn(); err != nil {
+			t.Fatalf("devBranchStep run %d: %v", i, err)
+		}
+	}
+}
+
+func TestMergeGitignoreFn(t *testing.T) {
+	const universal = "# Env\n.env\n.env.*\n\nnode_modules/\n"
+
+	tests := []struct {
+		name     string
+		existing *string
+		want     []string
+		wantNot  []string
+	}{
+		{
+			name: "no existing file writes universal",
+			want: []string{"# Env", ".env", "node_modules/"},
+		},
+		{
+			name:     "keeps framework rules and appends missing ones",
+			existing: ptr("/storage/*.key\n.env\n"),
+			want:     []string{"/storage/*.key", ".env", ".env.*", "node_modules/", "# Added by kapi"},
+		},
+		{
+			name:     "nothing missing leaves file untouched",
+			existing: ptr(".env\n.env.*\nnode_modules/"),
+			wantNot:  []string{"# Added by kapi"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".gitignore")
+			if tt.existing != nil {
+				if err := os.WriteFile(path, []byte(*tt.existing), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := mergeGitignoreFn(dir, universal)(); err != nil {
+				t.Fatalf("mergeGitignoreFn: %v", err)
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(string(data), "\n")
+			count := func(rule string) int {
+				n := 0
+				for _, l := range lines {
+					if l == rule {
+						n++
+					}
+				}
+				return n
+			}
+			for _, w := range tt.want {
+				if count(w) != 1 {
+					t.Errorf("rule %q appears %d times, want exactly once:\n%s", w, count(w), data)
+				}
+			}
+			for _, w := range tt.wantNot {
+				if count(w) != 0 {
+					t.Errorf("rule %q should not be present:\n%s", w, data)
+				}
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+func TestFrameworkSteps_JSInitializers(t *testing.T) {
+	tests := []struct {
+		id              string
+		pm              packagemanager.PM
+		wantLabel       string
+		wantInteractive bool
+	}{
+		{id: "astro", pm: packagemanager.NPM, wantLabel: "npm create astro@latest app", wantInteractive: true},
+		{id: "astro", pm: packagemanager.Bun, wantLabel: "bun create astro@latest app", wantInteractive: true},
+		{id: "hono", pm: packagemanager.NPM, wantLabel: "npm create hono@latest app", wantInteractive: true},
+		{id: "hono", pm: packagemanager.PNPM, wantLabel: "pnpm create hono@latest app", wantInteractive: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id+"/"+tt.pm.String(), func(t *testing.T) {
+			steps := frameworkSteps("/tmp/x/app", jsfw(tt.id), tt.pm)
+			if len(steps) != 1 {
+				t.Fatalf("expected 1 step, got %d", len(steps))
+			}
+			if steps[0].Label != tt.wantLabel {
+				t.Errorf("label = %q, want %q", steps[0].Label, tt.wantLabel)
+			}
+			if (steps[0].Cmd != nil) != tt.wantInteractive {
+				t.Errorf("interactive = %v, want %v", steps[0].Cmd != nil, tt.wantInteractive)
+			}
+		})
+	}
+}
+
+func TestFrameworkSteps_ViteTemplateFlags(t *testing.T) {
+	tests := []struct {
+		pm   packagemanager.PM
+		want string
+	}{
+		{pm: packagemanager.NPM, want: "npm create vite@latest app -- --template vue-ts --no-interactive"},
+		{pm: packagemanager.PNPM, want: "pnpm create vite@latest app --template vue-ts --no-interactive"},
+		{pm: packagemanager.Yarn, want: "yarn create vite@latest app --template vue-ts --no-interactive"},
+		{pm: packagemanager.Bun, want: "bun create vite@latest app --template vue-ts --no-interactive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pm.String(), func(t *testing.T) {
+			steps := frameworkSteps("/tmp/x/app", jsfw("vue-vite"), tt.pm)
+			if steps[0].Label != tt.want {
+				t.Errorf("label = %q, want %q", steps[0].Label, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlan_JSWithoutPackageManager_DefaultsToNpm(t *testing.T) {
+	steps := Plan("/tmp/x/app", jsfw("nestjs"), nil, gitconfig.GitConfig{}, packagemanager.None)
+	if want := "npx @nestjs/cli@latest new app --package-manager npm"; steps[0].Label != want {
+		t.Errorf("label = %q, want %q", steps[0].Label, want)
+	}
+}
+
+func TestStreamCmd_CancelStopsChildProcesses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are unix only")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- streamCmd("", "sh", "-c", "sleep 30 & sleep 30; wait")(ctx, func(string) {})
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected an error for a cancelled command")
+		}
+	case <-time.After(abortGracePeriod + 3*time.Second):
+		t.Fatal("command did not stop after cancellation")
+	}
+}
+
+func TestMkdirSteps_CreateDirectoriesNatively(t *testing.T) {
+	tests := []struct {
+		name string
+		fw   registry.Framework
+	}{
+		{name: "unknown framework", fw: registry.Framework{ID: "unknown", Ecosystem: "js"}},
+		{name: "vanilla php", fw: fw("vanilla-php")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "nested", "app")
+			step := frameworkSteps(dir, tt.fw, packagemanager.NPM)[0]
+			if step.Fn == nil || step.StreamFn != nil || step.Cmd != nil {
+				t.Fatal("mkdir must run in-process, not through an external command")
+			}
+			if err := step.Fn(); err != nil {
+				t.Fatalf("mkdir step: %v", err)
+			}
+			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+				t.Errorf("directory %s was not created", dir)
+			}
+		})
+	}
+}
+
+func TestStreamCmd_VeryLongLineDoesNotBlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell")
+	}
+	script := "head -c 3000000 /dev/zero | tr '\\0' a; echo; head -c 3000000 /dev/zero | tr '\\0' b; echo; echo done"
+	done := make(chan error, 1)
+	var lines []string
+	go func() {
+		done <- streamCmd("", "sh", "-c", script)(context.Background(), func(l string) {
+			if len(l) < 200 {
+				lines = append(lines, l)
+			}
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("command failed: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("streaming blocked on a very long output line")
+	}
+	if !slices.Contains(lines, lineTooLongNotice) || lines[len(lines)-1] != "done" {
+		t.Errorf("expected a notice per long line and the following output, got %v", lines)
+	}
+}
+
+func TestStreamCmd_OrphanHoldingOutputDoesNotBlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell")
+	}
+	orig := abortGracePeriod
+	abortGracePeriod = 300 * time.Millisecond
+	t.Cleanup(func() { abortGracePeriod = orig })
+
+	done := make(chan error, 1)
+	var lines []string
+	go func() {
+		// The background sleep inherits stdout and outlives the shell.
+		done <- streamCmd("", "sh", "-c", "sleep 3 & echo hello")(context.Background(), func(l string) {
+			lines = append(lines, l)
+		})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("a successful command must not fail because of an orphan: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("streaming blocked on output kept open by an orphaned process")
+	}
+	if !slices.Equal(lines, []string{"hello"}) {
+		t.Errorf("lines = %v, want [hello]", lines)
+	}
+}
+
+func TestLineWriter(t *testing.T) {
+	tests := []struct {
+		name   string
+		writes []string
+		want   []string
+	}{
+		{name: "split across writes", writes: []string{"hel", "lo\nwor", "ld\n"}, want: []string{"hello", "world"}},
+		{name: "unterminated last line is flushed", writes: []string{"a\nb"}, want: []string{"a", "b"}},
+		{name: "long line is replaced by a notice", writes: []string{"0123456789ABC\nok\n"}, want: []string{lineTooLongNotice, "ok"}},
+		{name: "long line across writes", writes: []string{"0123456789", "ABCDEF", "GH\nok"}, want: []string{lineTooLongNotice, "ok"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			w := &lineWriter{onLine: func(l string) { got = append(got, l) }, maxLine: 10}
+			for _, s := range tt.writes {
+				if n, err := w.Write([]byte(s)); err != nil || n != len(s) {
+					t.Fatalf("Write(%q) = %d, %v", s, n, err)
+				}
+			}
+			w.flush()
+			if _, err := w.Write([]byte("late\n")); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("lines = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInstallPlan(t *testing.T) {
+	tests := []struct {
+		name string
+		fw   registry.Framework
+		pm   packagemanager.PM
+		want string
+	}{
+		{name: "composer project", fw: fw("vanilla-php"), pm: packagemanager.None, want: "composer require laravel/pint"},
+		{name: "js without pm uses npm", fw: jsfw("vanilla-vite"), pm: packagemanager.None, want: "npm install laravel/pint"},
+		{name: "js with detected pm", fw: jsfw("vanilla-vite"), pm: packagemanager.Bun, want: "bun add laravel/pint"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			steps := InstallPlan("/tmp/app", tt.fw, []packages.Package{{Name: "laravel/pint"}}, tt.pm)
+			if len(steps) != 1 || steps[0].Label != tt.want {
+				t.Errorf("steps = %v, want [%q]", stepLabels(steps), tt.want)
+			}
+		})
+	}
+}
+
+func TestStopRunningCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a unix shell")
+	}
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		// "started" is printed once both sleeps belong to the process group.
+		script := "sleep 30 & sleep 30 & echo started; wait"
+		done <- streamCmd("", "sh", "-c", script)(context.Background(), func(line string) {
+			if line == "started" {
+				close(started)
+			}
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("command did not start")
+	}
+	StopRunningCommands()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected an error for a terminated command")
+		}
+	case <-time.After(abortGracePeriod + 3*time.Second):
+		t.Fatal("command kept running after StopRunningCommands")
+	}
+
+	running.mu.Lock()
+	defer running.mu.Unlock()
+	if len(running.procs) != 0 {
+		t.Errorf("%d commands still tracked after they exited", len(running.procs))
+	}
+}
+
+func TestFrameworkSteps_PHPProjectSkeletons(t *testing.T) {
+	// phalcon/phalcon and leafs/leaf are libraries, not composer create-project
+	// starters; they must not appear as the scaffolded package.
+	tests := []struct {
+		id        string
+		wantLabel string
+	}{
+		{id: "phalcon", wantLabel: "composer create-project phalcon/invo app"},
+		{id: "leafphp", wantLabel: "composer create-project leafs/mvc app"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			steps := frameworkSteps("/tmp/x/app", fw(tt.id), packagemanager.None)
+			if len(steps) != 1 || steps[0].Label != tt.wantLabel {
+				t.Errorf("steps = %v, want [%q]", stepLabels(steps), tt.wantLabel)
+			}
+		})
+	}
+}
+
+func TestFrameworkSteps_ApiPlatform_UsesSymfonySkeletonAndPack(t *testing.T) {
+	// api-platform/api-platform is abandoned in favor of api-platform/api-pack,
+	// which is a Symfony Flex pack meant to be required into a skeleton, not
+	// created standalone.
+	steps := frameworkSteps("/tmp/x/app", fw("api-platform"), packagemanager.None)
+	want := []string{
+		"composer create-project symfony/skeleton app",
+		"composer require api-platform/api-pack",
+	}
+	if !slices.Equal(stepLabels(steps), want) {
+		t.Errorf("steps = %v, want %v", stepLabels(steps), want)
 	}
 }

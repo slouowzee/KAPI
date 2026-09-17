@@ -33,165 +33,243 @@ func init() {
 	DefaultsByFramework = payload.Defaults
 }
 
-const searchTimeout = 10 * time.Second
-const detailTimeout = 4 * time.Second
-const searchLimitNpm = 250
-const searchLimitPackagist = 100
+const (
+	searchTimeout        = 10 * time.Second
+	detailTimeout        = 5 * time.Second
+	versionsTimeout      = 30 * time.Second
+	searchLimitNpm       = 250
+	searchLimitPackagist = 100
+	maxConcurrentDetails = 10
+)
+
+const (
+	npmRegistryURL   = "https://registry.npmjs.org"
+	npmDownloadsURL  = "https://api.npmjs.org/downloads/point/last-week"
+	packagistURL     = "https://packagist.org"
+	packagistRepoURL = "https://repo.packagist.org/p2"
+)
+
+// npmAbbreviatedMetadata is the "corgi" document: it only lists what installers
+// need and is several times lighter than the full packument.
+const npmAbbreviatedMetadata = "application/vnd.npm.install-v1+json"
 
 type Package struct {
-	Name           string
-	Description    string
-	Versions       []string
-	PinnedVersion  string
-	Weekly         int64
-	Stars          int64
-	GithubRepo     string
+	Name          string
+	Description   string
+	LatestVersion string
+	// Versions is only filled by FetchVersions: the version lists of popular
+	// packages weigh megabytes, so they are fetched on demand.
+	Versions      []string
+	PinnedVersion string
+	Weekly        int64
+	// Stars is filled on demand through Stars to stay within GitHub rate limits.
+	Stars      int64
+	GithubRepo string
 }
 
-var githubRepoRe = regexp.MustCompile(`github\.com[/:]([^/]+/[^/.\s]+?)(?:\.git)?$`)
+var (
+	githubRepoRe      = regexp.MustCompile(`github\.com[/:]([^/]+/[^/.\s]+?)(?:\.git)?$`)
+	githubShorthandRe = regexp.MustCompile(`^(?:github:)?([\w.-]+/[\w.-]+)$`)
+)
 
 func extractGithubRepo(repoURL string) string {
-	m := githubRepoRe.FindStringSubmatch(repoURL)
-	if len(m) < 2 {
-		return ""
+	if m := githubRepoRe.FindStringSubmatch(repoURL); len(m) >= 2 {
+		return m[1]
 	}
-	return m[1]
+	if m := githubShorthandRe.FindStringSubmatch(repoURL); len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }
 
-func fetchStars(ctx context.Context, repo string) int64 {
+// Stars returns the GitHub stars of a repository ("owner/name"), or 0 when
+// unknown. Results are cached by the trends package.
+func Stars(ctx context.Context, repo string) int64 {
 	if repo == "" {
 		return 0
 	}
-	tok := config.GithubToken()
-	stars, _ := trends.FetchStars(ctx, repo, tok)
+	stars, _ := trends.FetchStars(ctx, repo, config.GithubToken())
 	return stars
 }
 
-func enrichNpm(ctx context.Context, client *http.Client, pkg *Package) {
-	encoded := url.PathEscape(pkg.Name)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://registry.npmjs.org/"+encoded, nil)
+func getJSON(ctx context.Context, client *http.Client, endpoint, accept string, dest any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return
+		return err
 	}
 	req.Header.Set("User-Agent", "kapi-cli")
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return
+	if err != nil {
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var meta struct {
-		Description string                       `json:"description"`
-		Versions    map[string]json.RawMessage   `json:"versions"`
-		Repository  struct {
-			URL string `json:"url"`
-		} `json:"repository"`
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, endpoint)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
-		return
+	return json.NewDecoder(resp.Body).Decode(dest)
+}
+
+// repositoryURL reads the "repository" field of an npm manifest, which is
+// either a string or an object with a url.
+func repositoryURL(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var obj struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.URL
+	}
+	return ""
+}
+
+func SearchNpm(ctx context.Context, query string) ([]Package, error) {
+	endpoint := fmt.Sprintf("%s/-/v1/search?text=%s&size=%d", npmRegistryURL, url.QueryEscape(query), searchLimitNpm)
+
+	var payload struct {
+		Objects []struct {
+			Package struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				Version     string `json:"version"`
+				Links       struct {
+					Repository string `json:"repository"`
+				} `json:"links"`
+			} `json:"package"`
+			Downloads struct {
+				Weekly int64 `json:"weekly"`
+			} `json:"downloads"`
+		} `json:"objects"`
+	}
+	client := &http.Client{Timeout: searchTimeout}
+	if err := getJSON(ctx, client, endpoint, "application/json", &payload); err != nil {
+		return nil, fmt.Errorf("npm search: %w", err)
 	}
 
-	if len(pkg.Versions) == 0 && len(meta.Versions) > 0 {
-		for v := range meta.Versions {
-			pkg.Versions = append(pkg.Versions, v)
-		}
-		sort.Slice(pkg.Versions, func(i, j int) bool {
-			return semver.Greater(pkg.Versions[i], pkg.Versions[j])
+	results := make([]Package, 0, len(payload.Objects))
+	for _, o := range payload.Objects {
+		results = append(results, Package{
+			Name:          o.Package.Name,
+			Description:   o.Package.Description,
+			LatestVersion: o.Package.Version,
+			Weekly:        o.Downloads.Weekly,
+			GithubRepo:    extractGithubRepo(o.Package.Links.Repository),
 		})
 	}
-	if pkg.Description == "" {
-		pkg.Description = meta.Description
-	}
-	repo := extractGithubRepo(meta.Repository.URL)
-	pkg.GithubRepo = repo
-	pkg.Stars = fetchStars(ctx, repo)
+	return results, nil
+}
 
-	if pkg.Weekly == 0 {
-		dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"https://api.npmjs.org/downloads/point/last-week/"+url.PathEscape(pkg.Name), nil)
-		if err == nil {
-			dlReq.Header.Set("User-Agent", "kapi-cli")
-			dlResp, err := client.Do(dlReq)
-			if err == nil {
-				if dlResp.StatusCode == http.StatusOK {
-					var dl struct {
-						Downloads int64 `json:"downloads"`
-					}
-					if json.NewDecoder(dlResp.Body).Decode(&dl) == nil {
-						pkg.Weekly = dl.Downloads
-					}
-				}
-				_ = dlResp.Body.Close()
+type packagistSearchResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Repository  string `json:"repository"`
+	Downloads   int64  `json:"downloads"`
+}
+
+func searchPackagist(ctx context.Context, client *http.Client, query string, limit int) ([]packagistSearchResult, error) {
+	endpoint := fmt.Sprintf("%s/search.json?q=%s&per_page=%d", packagistURL, url.QueryEscape(query), limit)
+	var payload struct {
+		Results []packagistSearchResult `json:"results"`
+	}
+	if err := getJSON(ctx, client, endpoint, "application/json", &payload); err != nil {
+		return nil, fmt.Errorf("packagist search: %w", err)
+	}
+	return payload.Results, nil
+}
+
+func (r packagistSearchResult) toPackage() Package {
+	return Package{
+		Name:        r.Name,
+		Description: r.Description,
+		Weekly:      r.Downloads,
+		GithubRepo:  extractGithubRepo(r.Repository),
+	}
+}
+
+func SearchPackagist(ctx context.Context, query string) ([]Package, error) {
+	client := &http.Client{Timeout: searchTimeout}
+	found, err := searchPackagist(ctx, client, query, searchLimitPackagist)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]Package, 0, len(found))
+	for _, r := range found {
+		results = append(results, r.toPackage())
+	}
+	return results, nil
+}
+
+// fetchNpmSummary fills a package from its latest manifest (a few kilobytes)
+// and its weekly downloads.
+func fetchNpmSummary(ctx context.Context, client *http.Client, pkg *Package) {
+	var manifest struct {
+		Version     string          `json:"version"`
+		Description string          `json:"description"`
+		Repository  json.RawMessage `json:"repository"`
+	}
+	if err := getJSON(ctx, client, npmRegistryURL+"/"+url.PathEscape(pkg.Name)+"/latest", "application/json", &manifest); err == nil {
+		pkg.LatestVersion = manifest.Version
+		if pkg.Description == "" {
+			pkg.Description = manifest.Description
+		}
+		pkg.GithubRepo = extractGithubRepo(repositoryURL(manifest.Repository))
+	}
+
+	var downloads struct {
+		Downloads int64 `json:"downloads"`
+	}
+	if err := getJSON(ctx, client, npmDownloadsURL+"/"+url.PathEscape(pkg.Name), "application/json", &downloads); err == nil {
+		pkg.Weekly = downloads.Downloads
+	}
+}
+
+// fetchPackagistSummary fills a package from the packagist search API, whose
+// response is tiny compared to the full package document.
+func fetchPackagistSummary(ctx context.Context, client *http.Client, pkg *Package) {
+	found, err := searchPackagist(ctx, client, pkg.Name, 5)
+	if err == nil {
+		for _, r := range found {
+			if strings.EqualFold(r.Name, pkg.Name) {
+				summary := r.toPackage()
+				summary.Name = pkg.Name
+				*pkg = summary
+				return
 			}
 		}
 	}
+
+	// NOTE: contrib modules from drupal.org and free plugins mirrored by
+	// wpackagist are not indexed by Packagist itself — they live on their own
+	// composer repositories — so the search above finds nothing for them even
+	// though `composer require` resolves them fine. Ask the upstream registry
+	// directly instead.
+	switch {
+	case strings.HasPrefix(pkg.Name, "drupal/"):
+		fetchDrupalOrgSummary(ctx, client, pkg)
+	case strings.HasPrefix(pkg.Name, "wpackagist-plugin/"):
+		fetchWordPressOrgSummary(ctx, client, pkg)
+	}
 }
 
-func enrichPackagist(ctx context.Context, client *http.Client, pkg *Package) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://packagist.org/packages/"+pkg.Name+".json", nil)
-	if err != nil {
-		return
+// FetchDefaults returns the named packages with their description, latest
+// version and downloads. Packages that cannot be fetched keep only their name.
+func FetchDefaults(ctx context.Context, names []string, isPhp bool) []Package {
+	pkgs := make([]Package, len(names))
+	for i, name := range names {
+		pkgs[i] = Package{Name: name}
 	}
-	req.Header.Set("User-Agent", "kapi-cli")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	var meta struct {
-		Package struct {
-			Repository  string `json:"repository"`
-			Description string `json:"description"`
-			Downloads   struct {
-				Total int64 `json:"total"`
-			} `json:"downloads"`
-			Versions map[string]struct {
-				Version string `json:"version"`
-			} `json:"versions"`
-		} `json:"package"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
-		return
-	}
-
-	for v := range meta.Package.Versions {
-		if !strings.Contains(v, "dev") && !strings.HasPrefix(v, "v0.") {
-			pkg.Versions = append(pkg.Versions, v)
-		}
-	}
-	sort.Slice(pkg.Versions, func(i, j int) bool {
-		return semver.Greater(pkg.Versions[i], pkg.Versions[j])
-	})
-	if pkg.Description == "" {
-		pkg.Description = meta.Package.Description
-	}
-	if pkg.Weekly == 0 {
-		pkg.Weekly = meta.Package.Downloads.Total
-	}
-	repo := extractGithubRepo(meta.Package.Repository)
-	pkg.GithubRepo = repo
-	pkg.Stars = fetchStars(ctx, repo)
-}
-
-func enrichAll(ctx context.Context, pkgs []Package, isPhp bool) []Package {
-	const maxConcurrent = 20
-	sem := make(chan struct{}, maxConcurrent)
 
 	client := &http.Client{Timeout: detailTimeout}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
+	sem := make(chan struct{}, maxConcurrentDetails)
 	var wg sync.WaitGroup
 	for i := range pkgs {
 		wg.Add(1)
-		go func(i int) {
+		go func(pkg *Package) {
 			defer wg.Done()
 			select {
 			case sem <- struct{}{}:
@@ -200,121 +278,50 @@ func enrichAll(ctx context.Context, pkgs []Package, isPhp bool) []Package {
 			}
 			defer func() { <-sem }()
 			if isPhp {
-				enrichPackagist(ctx, client, &pkgs[i])
+				fetchPackagistSummary(ctx, client, pkg)
 			} else {
-				enrichNpm(ctx, client, &pkgs[i])
+				fetchNpmSummary(ctx, client, pkg)
 			}
-		}(i)
+		}(&pkgs[i])
 	}
 	wg.Wait()
 	return pkgs
 }
 
-func SearchNpm(ctx context.Context, query string) ([]Package, error) {
-	endpoint := fmt.Sprintf(
-		"https://registry.npmjs.org/-/v1/search?text=%s&size=%d",
-		url.QueryEscape(query),
-		searchLimitNpm,
-	)
+// FetchVersions returns the published versions of a package, newest first.
+// Development branches are excluded.
+func FetchVersions(ctx context.Context, name string, isPhp bool) ([]string, error) {
+	client := &http.Client{Timeout: versionsTimeout}
+	var versions []string
 
-	client := &http.Client{Timeout: searchTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "kapi-cli")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("npm search: HTTP %d", resp.StatusCode)
-	}
-
-	var payload struct {
-		Objects []struct {
-			Package struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-				Version     string `json:"version"`
-			} `json:"package"`
-			Downloads struct {
-				Weekly int64 `json:"weekly"`
-			} `json:"downloads"`
-		} `json:"objects"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
+	if isPhp {
+		var payload struct {
+			Packages map[string][]struct {
+				Version string `json:"version"`
+			} `json:"packages"`
+		}
+		if err := getJSON(ctx, client, packagistRepoURL+"/"+name+".json", "application/json", &payload); err != nil {
+			return nil, fmt.Errorf("fetch %s versions: %w", name, err)
+		}
+		for _, v := range payload.Packages[name] {
+			if v.Version != "" && !strings.HasPrefix(v.Version, "dev-") && !strings.HasSuffix(v.Version, "-dev") {
+				versions = append(versions, v.Version)
+			}
+		}
+	} else {
+		var payload struct {
+			Versions map[string]json.RawMessage `json:"versions"`
+		}
+		if err := getJSON(ctx, client, npmRegistryURL+"/"+url.PathEscape(name), npmAbbreviatedMetadata, &payload); err != nil {
+			return nil, fmt.Errorf("fetch %s versions: %w", name, err)
+		}
+		for v := range payload.Versions {
+			versions = append(versions, v)
+		}
 	}
 
-	results := make([]Package, 0, len(payload.Objects))
-	for _, o := range payload.Objects {
-		results = append(results, Package{
-			Name:        o.Package.Name,
-			Description: o.Package.Description,
-			Weekly:      o.Downloads.Weekly,
-		})
-	}
-
-	return enrichAll(ctx, results, false), nil
-}
-
-func SearchPackagist(ctx context.Context, query string) ([]Package, error) {
-	endpoint := fmt.Sprintf(
-		"https://packagist.org/search.json?q=%s&per_page=%d",
-		url.QueryEscape(query),
-		searchLimitPackagist,
-	)
-
-	client := &http.Client{Timeout: searchTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "kapi-cli")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("packagist search: HTTP %d", resp.StatusCode)
-	}
-
-	var payload struct {
-		Results []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Downloads   int64  `json:"downloads"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	results := make([]Package, 0, len(payload.Results))
-	for _, r := range payload.Results {
-		results = append(results, Package{
-			Name:        r.Name,
-			Description: r.Description,
-			Weekly:      r.Downloads,
-		})
-	}
-
-	return enrichAll(ctx, results, true), nil
-}
-
-func FetchDefaults(ctx context.Context, names []string, isPhp bool) []Package {
-	pkgs := make([]Package, len(names))
-	for i, name := range names {
-		pkgs[i] = Package{Name: name}
-	}
-	return enrichAll(ctx, pkgs, isPhp)
+	sort.Slice(versions, func(i, j int) bool {
+		return semver.Greater(versions[i], versions[j])
+	})
+	return versions, nil
 }

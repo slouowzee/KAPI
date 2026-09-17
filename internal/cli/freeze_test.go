@@ -171,3 +171,32 @@ func TestUnfreezeByName_RemovesRegistryIfEmpty(t *testing.T) {
 		t.Error("expected npm registry to be removed after unfreezing last package")
 	}
 }
+
+func TestParseFreezeArg(t *testing.T) {
+	tests := []struct {
+		arg         string
+		wantName    string
+		wantVersion string
+	}{
+		{arg: "react", wantName: "react"},
+		{arg: "react@18.2.0", wantName: "react", wantVersion: "18.2.0"},
+		{arg: "react/18.2.0", wantName: "react", wantVersion: "18.2.0"},
+		{arg: "@tanstack/react-query", wantName: "@tanstack/react-query"},
+		{arg: "@tanstack/react-query@5.0.0", wantName: "@tanstack/react-query", wantVersion: "5.0.0"},
+		{arg: "@types/node/20.1.0", wantName: "@types/node", wantVersion: "20.1.0"},
+		{arg: "symfony/var-dumper", wantName: "symfony/var-dumper"},
+		{arg: "symfony/validator", wantName: "symfony/validator"},
+		{arg: "livewire/volt", wantName: "livewire/volt"},
+		{arg: "symfony/var-dumper/v7.1.0", wantName: "symfony/var-dumper", wantVersion: "v7.1.0"},
+		{arg: "laravel/framework@11.0.0-beta.1", wantName: "laravel/framework", wantVersion: "11.0.0-beta.1"},
+		{arg: "vendor/2fa", wantName: "vendor/2fa"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.arg, func(t *testing.T) {
+			name, version := parseFreezeArg(tt.arg)
+			if name != tt.wantName || version != tt.wantVersion {
+				t.Errorf("parseFreezeArg(%q) = (%q, %q), want (%q, %q)", tt.arg, name, version, tt.wantName, tt.wantVersion)
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -23,37 +24,20 @@ func HandleUnfreeze(args []string) {
 	unfreezeBySelector()
 }
 
+var errNotFrozen = errors.New("package not frozen")
+
 func unfreezeByName(name string) {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Printf("Error loading configuration: %v\n", err)
-		os.Exit(1)
-	}
-
-	found := false
-	for reg, pkgs := range cfg.FreezeVersionPackages {
-		for i, p := range pkgs {
-			if p.Name == name {
-				if len(pkgs) == 1 {
-					delete(cfg.FreezeVersionPackages, reg)
-				} else {
-					cfg.FreezeVersionPackages[reg] = append(pkgs[:i], pkgs[i+1:]...)
-				}
-				found = true
-				break
-			}
+	err := config.Update(func(cfg *config.Config) error {
+		if !cfg.RemoveFrozen("", name) {
+			return errNotFrozen
 		}
-		if found {
-			break
-		}
-	}
-
-	if !found {
+		return nil
+	})
+	if errors.Is(err, errNotFrozen) {
 		fmt.Printf("Package '%s' not found in frozen packages.\n", name)
 		os.Exit(1)
 	}
-
-	if err := config.Save(cfg); err != nil {
+	if err != nil {
 		fmt.Printf("Error saving configuration: %v\n", err)
 		os.Exit(1)
 	}
@@ -114,19 +98,11 @@ func unfreezeBySelector() {
 
 	selected := entries[choice]
 
-	if len(cfg.FreezeVersionPackages[selected.reg]) == 1 {
-		delete(cfg.FreezeVersionPackages, selected.reg)
-	} else {
-		pkgs := cfg.FreezeVersionPackages[selected.reg]
-		for i, p := range pkgs {
-			if p.Name == selected.pkg.Name {
-				cfg.FreezeVersionPackages[selected.reg] = append(pkgs[:i], pkgs[i+1:]...)
-				break
-			}
-		}
-	}
-
-	if err := config.Save(cfg); err != nil {
+	err = config.Update(func(cfg *config.Config) error {
+		cfg.RemoveFrozen(selected.reg, selected.pkg.Name)
+		return nil
+	})
+	if err != nil {
 		fmt.Printf("Error saving configuration: %v\n", err)
 		os.Exit(1)
 	}

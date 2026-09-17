@@ -178,3 +178,26 @@ func TestScrollWindow_CursorCentered(t *testing.T) {
 		t.Errorf("cursor 10 outside window [%d, %d)", start, end)
 	}
 }
+
+func TestIsDangerous_WindowsPaths(t *testing.T) {
+	tests := []struct {
+		input     string
+		dangerous bool
+	}{
+		{input: `C:\`, dangerous: true},
+		{input: `D:`, dangerous: true},
+		{input: `C:\Windows\System32`, dangerous: true},
+		{input: `c:/windows`, dangerous: true},
+		{input: `C:\Program Files\app`, dangerous: true},
+		{input: `C:\Program Files (x86)`, dangerous: true},
+		{input: `C:\ProgramData\app`, dangerous: true},
+		{input: `C:\Users\me\projects\app`, dangerous: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isDangerous(tt.input) != ""; got != tt.dangerous {
+				t.Errorf("isDangerous(%q) dangerous = %v, want %v", tt.input, got, tt.dangerous)
+			}
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/slouowzee/kapi/internal/cli"
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/tui/styles"
@@ -16,7 +17,29 @@ type settingsStep int
 const (
 	SettingsStepMenu settingsStep = iota
 	SettingsStepPM
+	SettingsStepToken
 )
+
+const (
+	settingsItemPM = iota
+	settingsItemToken
+	settingsItemCount
+)
+
+func saveTokenCmd(token string) tea.Cmd {
+	return func() tea.Msg {
+		err := config.Update(func(cfg *config.Config) error {
+			cfg.GithubToken = token
+			return nil
+		})
+		return settingsTokenSavedMsg{err: err, cleared: token == ""}
+	}
+}
+
+type settingsTokenSavedMsg struct {
+	err     error
+	cleared bool
+}
 
 type settingsSavedMsg struct{ err error }
 type settingsInstalledPMsMsg struct{ pms []packagemanager.PM }
@@ -29,12 +52,11 @@ func detectInstalledPMsCmd() tea.Cmd {
 
 func savePMCmd(pm packagemanager.PM) tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load()
-		if err != nil {
-			return settingsSavedMsg{err: err}
-		}
-		cfg.PackageManager = pm.String()
-		return settingsSavedMsg{err: config.Save(cfg)}
+		err := config.Update(func(cfg *config.Config) error {
+			cfg.PackageManager = pm.String()
+			return nil
+		})
+		return settingsSavedMsg{err: err}
 	}
 }
 
@@ -45,6 +67,11 @@ type SettingsModel struct {
 	step settingsStep
 
 	currentPM packagemanager.PM
+
+	menuCursor   int
+	savedToken   string
+	tokenInput   string
+	tokenFromEnv bool
 
 	installedPMs []packagemanager.PM
 	pmsDetected  bool
@@ -59,15 +86,20 @@ type SettingsModel struct {
 
 func NewSettings(width, height int) SettingsModel {
 	cfg, err := config.Load()
+	m := SettingsModel{
+		width:        width,
+		height:       height,
+		step:         SettingsStepMenu,
+		currentPM:    packagemanager.Parse(cfg.PackageManager),
+		savedToken:   cfg.GithubToken,
+		tokenFromEnv: os.Getenv("GITHUB_TOKEN") != "",
+	}
+	// NOTE: writing to stderr would corrupt the alternate screen.
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
+		m.lastErr = err
+		m.lastMsg = "Could not load config: " + err.Error()
 	}
-	return SettingsModel{
-		width:     width,
-		height:    height,
-		step:      SettingsStepMenu,
-		currentPM: packagemanager.Parse(cfg.PackageManager),
-	}
+	return m
 }
 
 func (m *SettingsModel) SetSize(width, height int) {
@@ -78,6 +110,9 @@ func (m *SettingsModel) SetSize(width, height int) {
 func (m SettingsModel) IsBack() bool                 { return m.backPressed }
 func (m *SettingsModel) ConsumeBack()                { m.backPressed = false }
 func (m SettingsModel) CurrentPM() packagemanager.PM { return m.currentPM }
+
+// IsInputMode reports whether the user is typing, so q must not quit.
+func (m SettingsModel) IsInputMode() bool { return m.step == SettingsStepToken }
 
 func (m SettingsModel) Init() tea.Cmd {
 	return detectInstalledPMsCmd()
@@ -109,12 +144,28 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		}
 		m.step = SettingsStepMenu
 
+	case settingsTokenSavedMsg:
+		m.step = SettingsStepMenu
+		switch {
+		case msg.err != nil:
+			m.lastErr = msg.err
+			m.lastMsg = "Failed to save: " + msg.err.Error()
+		case msg.cleared:
+			m.lastErr = nil
+			m.lastMsg = "GitHub token removed."
+		default:
+			m.lastErr = nil
+			m.lastMsg = "GitHub token saved."
+		}
+
 	case tea.KeyMsg:
 		switch m.step {
 		case SettingsStepMenu:
 			return m.handleMenuKey(msg)
 		case SettingsStepPM:
 			return m.handlePMKey(msg)
+		case SettingsStepToken:
+			return m.handleTokenKey(msg)
 		}
 	}
 
@@ -125,14 +176,52 @@ func (m SettingsModel) handleMenuKey(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.backPressed = true
-	case "enter":
-		if !m.pmsDetected {
-			break
+	case "up", "k":
+		if m.menuCursor > 0 {
+			m.menuCursor--
 		}
-		m.lastMsg = ""
-		m.lastErr = nil
-		m.pmCursor = m.pmCursorFor(m.currentPM)
-		m.step = SettingsStepPM
+	case "down", "j":
+		if m.menuCursor < settingsItemCount-1 {
+			m.menuCursor++
+		}
+	case "enter":
+		switch m.menuCursor {
+		case settingsItemPM:
+			if !m.pmsDetected {
+				break
+			}
+			m.lastMsg = ""
+			m.lastErr = nil
+			m.pmCursor = m.pmCursorFor(m.currentPM)
+			m.step = SettingsStepPM
+		case settingsItemToken:
+			m.lastMsg = ""
+			m.lastErr = nil
+			m.tokenInput = ""
+			m.step = SettingsStepToken
+		}
+	}
+	return m, nil
+}
+
+func (m SettingsModel) handleTokenKey(msg tea.KeyMsg) (SettingsModel, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.tokenInput = ""
+		m.step = SettingsStepMenu
+	case tea.KeyEnter:
+		token := strings.TrimSpace(m.tokenInput)
+		m.tokenInput = ""
+		m.savedToken = token
+		return m, saveTokenCmd(token)
+	case tea.KeyBackspace:
+		if runes := []rune(m.tokenInput); len(runes) > 0 {
+			m.tokenInput = string(runes[:len(runes)-1])
+		}
+	case tea.KeyCtrlU:
+		m.tokenInput = ""
+	case tea.KeyRunes, tea.KeySpace:
+		m.tokenInput += string(msg.Runes)
 	}
 	return m, nil
 }
@@ -183,6 +272,8 @@ func (m SettingsModel) View() string {
 	switch m.step {
 	case SettingsStepPM:
 		return m.viewPM()
+	case SettingsStepToken:
+		return m.viewToken()
 	default:
 		return m.viewMenu()
 	}
@@ -204,14 +295,47 @@ func (m SettingsModel) viewMenu() string {
 
 	pmLabel := pmDisplayLabel(m.currentPM)
 	if !m.pmsDetected {
-		pmLabel += styles.DimStyle.Render("  detecting…")
+		pmLabel += "  detecting…"
 	}
-	label := fmt.Sprintf("Package manager   %s", styles.DimStyle.Render(pmLabel+" ›"))
-	cursor := styles.CursorStyle.Render("  ❯❯")
-	fmt.Fprintf(&sb, "%s%s\n", cursor, styles.SelectedStyle.Render(" "+label))
+	tokenLabel := "not set"
+	if m.savedToken != "" {
+		tokenLabel = cli.MaskToken(m.savedToken)
+	}
+
+	items := []struct{ name, value string }{
+		{name: "Package manager", value: pmLabel},
+		{name: "GitHub token", value: tokenLabel},
+	}
+	for i, item := range items {
+		label := fmt.Sprintf("%-18s%s", item.name, styles.DimStyle.Render(item.value+" ›"))
+		if i == m.menuCursor {
+			fmt.Fprintf(&sb, "%s%s\n", styles.CursorStyle.Render("  ❯❯"), styles.SelectedStyle.Render(" "+label))
+		} else {
+			fmt.Fprintf(&sb, "      %s\n", styles.MutedStyle.Render(label))
+		}
+	}
 
 	sb.WriteString("\n")
-	sb.WriteString(styles.MutedStyle.Render("  [↵] select   [esc] back   [q] quit") + "\n")
+	sb.WriteString(styles.MutedStyle.Render("  [↑↓] navigate   [↵] select   [esc] back   [q] quit") + "\n")
+	return sb.String()
+}
+
+func (m SettingsModel) viewToken() string {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(styles.TitleStyle.Render("  GitHub token") + "\n")
+	sb.WriteString(styles.DimStyle.Render("  Classic token with the repo, write:ssh_signing_key and write:gpg_key scopes.") + "\n")
+	sb.WriteString(styles.DimStyle.Render("  Leave empty and confirm to remove the saved token.") + "\n")
+	if m.tokenFromEnv {
+		sb.WriteString(styles.SubtitleStyle.Render("  ⚠ GITHUB_TOKEN is set in your environment and takes precedence.") + "\n")
+	}
+	sb.WriteString("\n")
+
+	masked := strings.Repeat("•", len([]rune(m.tokenInput)))
+	fmt.Fprintf(&sb, "  %s%s%s\n", styles.MutedStyle.Render("Token: "), masked, styles.TitleStyle.Render("_"))
+
+	sb.WriteString("\n")
+	sb.WriteString(styles.MutedStyle.Render("  [↵] save   [ctrl+u] clear   [esc] cancel") + "\n")
 	return sb.String()
 }
 

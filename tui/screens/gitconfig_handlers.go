@@ -97,9 +97,9 @@ func (m GitConfigModel) handleRemoteNameInput(msg tea.KeyMsg) (GitConfigModel, t
 	case "enter":
 		name := strings.TrimSpace(m.remoteRepoName)
 		if name != "" {
-			m.step = GITCFG_STEP_EXECUTING
-			m.execMsg = "Creating GitHub repository..."
-			return m, execGithubCreateRepoCmd(name, m.remoteIsPrivate, m.dir)
+			m.remoteRepoName = name
+			m.remoteProtocolCursor = 0
+			m.step = GITCFG_STEP_REMOTE_PROTOCOL
 		}
 	case "left":
 		if m.remoteNamePos > 0 {
@@ -123,6 +123,26 @@ func (m GitConfigModel) handleRemoteNameInput(msg tea.KeyMsg) (GitConfigModel, t
 			m.remoteRepoName = string(append(runes[:m.remoteNamePos], append(msg.Runes, runes[m.remoteNamePos:]...)...))
 			m.remoteNamePos += len(msg.Runes)
 		}
+	}
+	return m, nil
+}
+
+// handleRemoteProtocol lets the user pick SSH or HTTPS for the new GitHub
+// remote before it is created.
+func (m GitConfigModel) handleRemoteProtocol(msg tea.KeyMsg) (GitConfigModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.clearMsg()
+		m.step = GITCFG_STEP_REMOTE_NAME_INPUT
+	case "left", "up", "h", "k":
+		m.remoteProtocolCursor = 0
+	case "right", "down", "l", "j":
+		m.remoteProtocolCursor = 1
+	case "enter":
+		m.remoteHTTPS = m.remoteProtocolCursor == 1
+		m.step = GITCFG_STEP_EXECUTING
+		m.execMsg = "Creating GitHub repository..."
+		return m, execGithubCreateRepoCmd(m.remoteRepoName, m.remoteIsPrivate, m.remoteHTTPS, m.dir)
 	}
 	return m, nil
 }
@@ -290,7 +310,7 @@ func (m GitConfigModel) handleSigningKey(msg tea.KeyMsg) (GitConfigModel, tea.Cm
 			return m, runKeyGenCmd(m.signingFormat)
 		}
 		m.signingKey = selected
-		if (m.signingFormat == "ssh" && m.scopes.WritePublicKey) || (m.signingFormat == "gpg" && m.scopes.WriteGPGKey) {
+		if (m.signingFormat == "ssh" && m.scopes.WriteSSHSigningKey) || (m.signingFormat == "gpg" && m.scopes.WriteGPGKey) {
 			m.step = GITCFG_STEP_SIGNING_PUSH_GITHUB
 			m.execMsg = "Configuring signing..."
 			return m, execGitSigningCmd(m.dir, m.signingFormat, m.signingScope, m.signingKey)
@@ -374,13 +394,13 @@ func (m GitConfigModel) handleManageList(msg tea.KeyMsg) (GitConfigModel, tea.Cm
 		if selected == signingGenSentinel {
 			return m, runKeyGenCmd(m.manageFormat)
 		}
-		if (m.manageFormat == "ssh" && m.scopes.WritePublicKey) || (m.manageFormat == "gpg" && m.scopes.WriteGPGKey) {
+		if (m.manageFormat == "ssh" && m.scopes.WriteSSHSigningKey) || (m.manageFormat == "gpg" && m.scopes.WriteGPGKey) {
 			m.step = GITCFG_STEP_MANAGE_PUSH_GITHUB
 			m.execMsg = "Pushing key to GitHub..."
 			return m, execGithubPushKeyCmd(m.manageFormat, selected, "KAPI Manage Key")
 		}
 		m.lastErr = errors.New("missing GitHub scope to push key")
-		m.lastMsg = "Missing GitHub scope (requires write:public_key or write:gpg_key)"
+		m.lastMsg = "Missing GitHub scope (requires write:ssh_signing_key or write:gpg_key)"
 	}
 	return m, nil
 }

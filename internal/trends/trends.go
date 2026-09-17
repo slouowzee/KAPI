@@ -98,25 +98,26 @@ func fetchNpm(ctx context.Context, pkg string) (int64, string, error) {
 	return dlResp.Downloads, metaResp.Version, nil
 }
 
+// fetchPackagist uses the stats endpoint rather than the full package
+// document (packages/{pkg}.json), which carries the readme, every version's
+// full metadata and can run into megabytes for popular packages (symfony/symfony
+// alone is ~5MB) — stats.json has the same downloads total and version list
+// in a few kilobytes.
 func fetchPackagist(ctx context.Context, pkg string) (int64, string, error) {
-	url := fmt.Sprintf("https://packagist.org/packages/%s.json", pkg)
+	url := fmt.Sprintf("https://packagist.org/packages/%s/stats.json", pkg)
 
 	var resp struct {
-		Package struct {
-			Downloads struct {
-				Total int64 `json:"total"`
-			} `json:"downloads"`
-			Versions map[string]struct {
-				Version string `json:"version"`
-			} `json:"versions"`
-		} `json:"package"`
+		Downloads struct {
+			Total int64 `json:"total"`
+		} `json:"downloads"`
+		Versions []string `json:"versions"`
 	}
 	if err := getJSON(ctx, url, &resp); err != nil {
 		return 0, "", err
 	}
 
 	latest := ""
-	for v := range resp.Package.Versions {
+	for _, v := range resp.Versions {
 		if !strings.Contains(v, "dev") && !strings.HasPrefix(v, "v0.") {
 			if latest == "" || semver.Greater(v, latest) {
 				latest = v
@@ -124,7 +125,7 @@ func fetchPackagist(ctx context.Context, pkg string) (int64, string, error) {
 		}
 	}
 
-	return resp.Package.Downloads.Total, latest, nil
+	return resp.Downloads.Total, latest, nil
 }
 
 func fetchGithubStars(ctx context.Context, repo string, token string) (int64, error) {

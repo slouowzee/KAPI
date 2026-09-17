@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"os"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
 	"github.com/slouowzee/kapi/internal/ecosystem"
@@ -55,6 +52,14 @@ type App struct {
 	selectedPM        packagemanager.PM
 	selectedGit       screens.GitConfig
 
+	// defaultPM is the package manager saved in the config; it preselects the
+	// package manager screen whenever no choice has been made yet.
+	defaultPM packagemanager.PM
+
+	// configErr is reported once the TUI has exited: anything printed before
+	// is hidden by the alternate screen.
+	configErr error
+
 	cdDir      string
 	browseMode bool
 	editMode   bool
@@ -62,13 +67,13 @@ type App struct {
 
 func New() App {
 	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "kapi: warning: could not load config: %v\n", err)
-	}
+	defaultPM := packagemanager.Parse(cfg.PackageManager)
 	return App{
 		screen:     ScreenWelcome,
 		welcome:    screens.NewWelcome(0, 0),
-		selectedPM: packagemanager.Parse(cfg.PackageManager),
+		selectedPM: defaultPM,
+		defaultPM:  defaultPM,
+		configErr:  err,
 	}
 }
 
@@ -109,6 +114,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// NOTE: while scaffolding, ctrl+c asks for confirmation and q is ignored
+		// so that running commands are stopped and cleaned up properly.
+		if a.screen == ScreenExec && a.exec.IsBusy() {
+			break
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit
@@ -120,6 +130,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			if a.screen == ScreenGitConfig && a.gitConfig.IsInputMode() {
+				break
+			}
+			if a.screen == ScreenSettings && a.settings.IsInputMode() {
 				break
 			}
 			if a.screen == ScreenFramework || a.screen == ScreenPackages {
@@ -160,14 +173,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if updated.IsBrowsePackagesSelected() {
 			a.welcome.ConsumeEnter()
-			eco := updated.Ecosystem()
-			fw := browseFallbackFramework(eco)
 			a.selectedDir = updated.WorkDir()
-			a.selectedFramework = fw
 			a.browseMode = true
-			a.screen = ScreenPackages
-			a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir)
-			return a, a.packages.Init()
+			// NOTE: a project using both composer and npm (e.g. Laravel + Vite)
+			// lets the user pick which registry to browse.
+			if updated.Ecosystem() == ecosystem.ECOSYSTEM_BOTH {
+				a.screen = ScreenEcosystem
+				a.ecosystem = screens.NewEcosystem(a.width, a.height, a.selectedDir)
+				return a, a.ecosystem.Init()
+			}
+			return a.startBrowse(updated.Ecosystem())
 		}
 		if updated.IsUpdateSelected() {
 			a.welcome.ConsumeEnter()
@@ -213,6 +228,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if updated.IsBack() {
 			a.ecosystem.ConsumeBack()
+			if a.browseMode {
+				a.browseMode = false
+				a.screen = ScreenWelcome
+				return a, nil
+			}
 			if a.editMode {
 				a.editMode = false
 				return a.goToRecap()
@@ -222,6 +242,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if updated.Done() {
 			a.ecosystem.ConsumeDone()
+			if a.browseMode {
+				return a.startBrowse(updated.SelectedEcosystem())
+			}
 			newEco := updated.SelectedEcosystem()
 			if a.editMode && newEco != a.selectedEcosystem {
 				a.selectedPackages = nil
@@ -295,9 +318,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated.Done() {
 			a.packages.ConsumeDone()
 			if a.browseMode {
-				a.browseMode = false
-				a.screen = ScreenWelcome
-				return a, nil
+				return a.installBrowsedPackages()
 			}
 			a.selectedPackages = a.packages.SelectedPackages()
 			if a.editMode {
@@ -334,9 +355,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if a.selectedFramework.Ecosystem == "js" {
-				a.screen = ScreenPMSelect
-				a.pmSelect = screens.NewPMSelect(a.width, a.height, a.selectedPM)
-				return a, a.pmSelect.Init()
+				return a.goToPMSelect()
 			}
 			return a.goToRecap()
 		}
@@ -399,9 +418,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.screen = ScreenGit
 			case screens.RECAP_SECTION_PM:
 				if a.selectedFramework.Ecosystem == "js" {
-					a.pmSelect = screens.NewPMSelect(a.width, a.height, a.selectedPM)
-					a.screen = ScreenPMSelect
-					return a, a.pmSelect.Init()
+					return a.goToPMSelect()
 				} else {
 					a.git = screens.Git(a.width, a.height, a.selectedDir, a.selectedGit)
 					a.screen = ScreenGit
@@ -412,12 +429,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated.Done() {
 			a.recap.ConsumeDone()
 			steps := scaffold.Plan(a.selectedDir, a.selectedFramework, a.selectedPackages, a.selectedGit, a.selectedPM)
-			execSteps := make([]screens.ExecStep, len(steps))
-			for i, s := range steps {
-				execSteps[i] = screens.ExecStep{Label: s.Label, Cmd: s.Cmd, Fn: s.Fn, StreamFn: s.StreamFn}
-			}
 			a.screen = ScreenExec
-			a.exec = screens.NewExec(a.width, a.height, execSteps, a.selectedDir)
+			a.exec = screens.NewExec(a.width, a.height, toExecSteps(steps), a.selectedDir)
 			return a, a.exec.Init()
 		}
 		return a, cmd
@@ -441,6 +454,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.settings.ConsumeBack()
 			if updated.CurrentPM() != packagemanager.None {
 				a.selectedPM = updated.CurrentPM()
+				a.defaultPM = updated.CurrentPM()
 			}
 			a.screen = ScreenWelcome
 			return a, nil
@@ -453,11 +467,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if updated.ShouldReturnToRecap() {
 			a.exec.ConsumeReturnToRecap()
+			if a.browseMode {
+				a.screen = ScreenPackages
+				return a, nil
+			}
 			return a.goToRecap()
 		}
 		if updated.Done() {
 			if updated.HasErr() {
 				return a, cmd
+			}
+			if a.browseMode {
+				a.browseMode = false
+				a.screen = ScreenWelcome
+				a.welcome = screens.NewWelcome(a.width, a.height)
+				return a, a.welcome.Init()
 			}
 			if updated.CdRequested() {
 				a.cdDir = a.selectedDir
@@ -511,8 +535,23 @@ func (a App) View() string {
 	return ""
 }
 
+func (a App) goToPMSelect() (App, tea.Cmd) {
+	preselected := a.selectedPM
+	if preselected == packagemanager.None {
+		preselected = a.defaultPM
+	}
+	a.screen = ScreenPMSelect
+	a.pmSelect = screens.NewPMSelect(a.width, a.height, preselected)
+	return a, a.pmSelect.Init()
+}
+
 func (a App) goToRecap() (App, tea.Cmd) {
 	a.selectedPackages = a.packages.SelectedPackages()
+	// NOTE: switching to a JS framework from the summary resets the package
+	// manager, which must be chosen again before scaffolding.
+	if a.selectedFramework.Ecosystem == "js" && a.selectedPM == packagemanager.None {
+		return a.goToPMSelect()
+	}
 	a.screen = ScreenRecap
 	a.recap = screens.NewRecap(a.width, a.height, screens.RecapSummary{
 		Dir:       a.selectedDir,
@@ -526,6 +565,55 @@ func (a App) goToRecap() (App, tea.Cmd) {
 
 func (a App) FinalDir() string { return a.cdDir }
 
+func (a App) ConfigError() error { return a.configErr }
+
+func (a App) startBrowse(eco ecosystem.Ecosystem) (App, tea.Cmd) {
+	fw := browseFallbackFramework(eco)
+	// NOTE: using the real framework keeps its favorites and suggestions.
+	if detected, ok := registry.DetectProjectFramework(a.selectedDir, fw.Ecosystem); ok {
+		fw = detected
+	}
+	a.selectedFramework = fw
+	a.screen = ScreenPackages
+	a.packages = screens.NewPackages(a.width, a.height, fw, a.selectedDir).WithConfirmLabel("install")
+	return a, a.packages.Init()
+}
+
+// installBrowsedPackages installs the cart into the current project with the
+// package manager its lockfile points to.
+func (a App) installBrowsedPackages() (App, tea.Cmd) {
+	cart := a.packages.SelectedPackages()
+	if len(cart) == 0 {
+		a.browseMode = false
+		a.screen = ScreenWelcome
+		return a, nil
+	}
+
+	pm := packagemanager.DetectFromLockfile(a.selectedDir)
+	if pm == packagemanager.None {
+		pm = a.defaultPM
+	}
+	if issues := installPreflight(a.selectedFramework, pm); scaffold.HasBlocking(issues) {
+		a.packages = a.packages.WithStatus("Cannot install: " + issues[0].Message)
+		return a, nil
+	}
+	steps := scaffold.InstallPlan(a.selectedDir, a.selectedFramework, cart, pm)
+	a.screen = ScreenExec
+	a.exec = screens.NewInstallExec(a.width, a.height, toExecSteps(steps))
+	return a, a.exec.Init()
+}
+
+// installPreflight is a variable so tests do not depend on the machine's tools.
+var installPreflight = scaffold.InstallPreflight
+
+func toExecSteps(steps []scaffold.Step) []screens.ExecStep {
+	execSteps := make([]screens.ExecStep, len(steps))
+	for i, s := range steps {
+		execSteps[i] = screens.ExecStep{Label: s.Label, Cmd: s.Cmd, Fn: s.Fn, StreamFn: s.StreamFn}
+	}
+	return execSteps
+}
+
 func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 	switch eco {
 	case ecosystem.ECOSYSTEM_PHP:
@@ -536,4 +624,3 @@ func browseFallbackFramework(eco ecosystem.Ecosystem) registry.Framework {
 		return registry.Framework{ID: "vanilla-vite", Name: "project", Ecosystem: "js"}
 	}
 }
-

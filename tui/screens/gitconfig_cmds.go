@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/config"
+	"github.com/slouowzee/kapi/internal/github"
 )
 
 type gitcfgDetectionMsg struct {
@@ -241,77 +241,35 @@ func execGitKeyDeleteCmd(format, key string) tea.Cmd {
 	}
 }
 
-func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
+func execGithubCreateRepoCmd(name string, private, https bool, dir string) tea.Cmd {
 	return func() tea.Msg {
-		tok := config.GithubToken()
-		if tok == "" {
-			return gitcfgExecMsg{err: errors.New("GitHub token not found")}
-		}
-
-		bodyData := map[string]any{
-			"name":    name,
-			"private": private,
-		}
-		reqBody, err := json.Marshal(bodyData)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		repo, err := github.CreateRepo(ctx, config.GithubToken(), name, private)
 		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not encode GitHub API request body: %w", err)}
+			return gitcfgExecMsg{err: err}
 		}
-
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://api.github.com/user/repos", bytes.NewReader(reqBody))
-		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not create GitHub API request: %w", err)}
-		}
-		req.Header.Set("Authorization", "Bearer "+tok)
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-		httpClient := &http.Client{Timeout: 15 * time.Second}
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not create repo on GitHub: %w", err)}
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return gitcfgExecMsg{err: fmt.Errorf("could not read GitHub API response: %w", err)}
-		}
-
-		if resp.StatusCode == http.StatusUnprocessableEntity {
-			return gitcfgExecMsg{err: fmt.Errorf("GitHub repo '%s' already exists", name)}
-		}
-		if resp.StatusCode != http.StatusCreated {
-			return gitcfgExecMsg{err: fmt.Errorf("failed to create repo (HTTP %d): %s", resp.StatusCode, string(bodyBytes))}
-		}
-
-		var result struct {
-			SSHUrl string `json:"ssh_url"`
-		}
-		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return gitcfgExecMsg{err: errors.New("failed to parse GitHub response")}
-		}
-
-		sshUrl := result.SSHUrl
-		if sshUrl == "" {
-			return gitcfgExecMsg{err: errors.New("no SSH URL in GitHub response")}
+		remoteURL := repo.SSHURL
+		if https {
+			remoteURL = repo.CloneURL
 		}
 
 		chk := exec.Command("git", "remote", "get-url", "origin")
 		chk.Dir = dir
 		if err := chk.Run(); err == nil {
-			cmd := exec.Command("git", "remote", "set-url", "origin", sshUrl)
+			cmd := exec.Command("git", "remote", "set-url", "origin", remoteURL)
 			cmd.Dir = dir
 			if err := cmd.Run(); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("repo created but failed to set remote: %w", err)}
 			}
-			return gitcfgExecMsg{newRemoteURL: sshUrl, successMsg: "GitHub repo created and remote updated successfully."}
+			return gitcfgExecMsg{newRemoteURL: remoteURL, successMsg: "GitHub repo created and remote updated successfully."}
 		}
-		cmd := exec.Command("git", "remote", "add", "origin", sshUrl)
+		cmd := exec.Command("git", "remote", "add", "origin", remoteURL)
 		cmd.Dir = dir
 		if err := cmd.Run(); err != nil {
 			return gitcfgExecMsg{err: fmt.Errorf("repo created but failed to add remote: %w", err)}
 		}
-		return gitcfgExecMsg{newRemoteURL: sshUrl, successMsg: "GitHub repo created and remote added successfully."}
+		return gitcfgExecMsg{newRemoteURL: remoteURL, successMsg: "GitHub repo created and remote added successfully."}
 	}
 }
 
@@ -421,7 +379,9 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 		var reqBody []byte
 
 		if format == "ssh" {
-			endpoint = "https://api.github.com/user/keys"
+			// NOTE: /user/keys registers authentication keys; commits signed with
+			// them would show as unverified.
+			endpoint = "https://api.github.com/user/ssh_signing_keys"
 			content, err := os.ReadFile(key)
 			if err != nil {
 				return gitcfgGithubPushDoneMsg{err: fmt.Errorf("could not read SSH public key: %w", err)}
@@ -478,6 +438,14 @@ func execGithubPushKeyCmd(format, key, title string) tea.Cmd {
 	}
 }
 
+// signingGitFormat maps kapi's signing format to git's gpg.format value.
+func signingGitFormat(format string) string {
+	if format == "ssh" {
+		return "ssh"
+	}
+	return "openpgp"
+}
+
 func execGitSigningCmd(dir, format, scope, key string) tea.Cmd {
 	return func() tea.Msg {
 		scopes := []string{}
@@ -501,12 +469,12 @@ func execGitSigningCmd(dir, format, scope, key string) tea.Cmd {
 			if err := cmd2.Run(); err != nil {
 				return gitcfgSigningDoneMsg{err: fmt.Errorf("could not set user.signingkey (%s): %w", s, err)}
 			}
-			if format == "ssh" {
-				cmd3 := exec.Command("git", "config", s, "gpg.format", "ssh")
-				cmd3.Dir = dir
-				if err := cmd3.Run(); err != nil {
-					return gitcfgSigningDoneMsg{err: fmt.Errorf("could not set gpg.format (%s): %w", s, err)}
-				}
+			// NOTE: gpg.format must always be written: a previous SSH setup
+			// leaves "ssh" behind, which breaks GPG signing.
+			cmd3 := exec.Command("git", "config", s, "gpg.format", signingGitFormat(format))
+			cmd3.Dir = dir
+			if err := cmd3.Run(); err != nil {
+				return gitcfgSigningDoneMsg{err: fmt.Errorf("could not set gpg.format (%s): %w", s, err)}
 			}
 		}
 

@@ -1,14 +1,17 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/scaffold"
 	"github.com/slouowzee/kapi/tui/styles"
 )
 
@@ -36,6 +39,9 @@ type RecapModel struct {
 
 	cursor int
 
+	checking bool
+	issues   []scaffold.Issue
+
 	done           bool
 	backSection    RecapSection
 	backPressed    bool
@@ -61,8 +67,18 @@ func NewRecap(width, height int, s RecapSummary) RecapModel {
 		gitCfg:    s.GitCfg,
 		pm:        s.PM,
 		cursor:    int(RECAP_SECTION_CONFIRM),
+		checking:  true,
 	}
 }
+
+type preflightDoneMsg struct {
+	issues []scaffold.Issue
+}
+
+// runPreflight is a variable so tests do not depend on the machine's tools.
+var runPreflight = scaffold.Preflight
+
+const preflightTimeout = 15 * time.Second
 
 func (m *RecapModel) SetSize(width, height int) {
 	m.width = width
@@ -81,7 +97,19 @@ func (m RecapModel) BackSection() RecapSection { return m.backSection }
 
 func (m *RecapModel) ConsumeBack() { m.backPressed = false }
 
-func (m RecapModel) Init() tea.Cmd { return nil }
+func (m RecapModel) Init() tea.Cmd {
+	dir, fw, gitCfg, pm, withPackages := m.dir, m.framework, m.gitCfg, m.pm, len(m.pkgs) > 0
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+		defer cancel()
+		return preflightDoneMsg{issues: runPreflight(ctx, dir, fw, gitCfg, pm, withPackages)}
+	}
+}
+
+// CanScaffold reports whether the checks are done and nothing blocks.
+func (m RecapModel) CanScaffold() bool {
+	return !m.checking && !scaffold.HasBlocking(m.issues)
+}
 
 func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -89,6 +117,10 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case preflightDoneMsg:
+		m.checking = false
+		m.issues = msg.issues
 
 	case tea.KeyMsg:
 		if m.abandonPending {
@@ -101,10 +133,9 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 			break
 		}
 
+		// NOTE: the package manager row is skipped for PHP when moving, it
+		// must not shorten the list: abandon stays reachable.
 		maxCursor := int(RECAP_SECTION_ABANDON)
-		if m.framework.Ecosystem == "php" {
-			maxCursor = int(RECAP_SECTION_ABANDON) - 1
-		}
 
 		switch msg.String() {
 		case "up", "k":
@@ -125,7 +156,9 @@ func (m RecapModel) Update(msg tea.Msg) (RecapModel, tea.Cmd) {
 			sec := RecapSection(m.cursor)
 			switch sec {
 			case RECAP_SECTION_CONFIRM:
-				m.done = true
+				if m.CanScaffold() {
+					m.done = true
+				}
 			case RECAP_SECTION_ABANDON:
 				m.abandonPending = true
 			default:
@@ -168,6 +201,7 @@ func (m RecapModel) View() string {
 
 		if row.section == RECAP_SECTION_CONFIRM {
 			sb.WriteString("\n")
+			sb.WriteString(m.renderIssues())
 			if isCursor {
 				fmt.Fprintf(&sb, "%s%s\n",
 					styles.CursorStyle.Render("  ❯❯"),
@@ -220,6 +254,27 @@ func (m RecapModel) View() string {
 	return sb.String()
 }
 
+func (m RecapModel) renderIssues() string {
+	if m.checking {
+		return styles.DimStyle.Render("  Checking prerequisites…") + "\n\n"
+	}
+	if len(m.issues) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, issue := range m.issues {
+		if issue.Blocking {
+			sb.WriteString(styles.ErrorStyle.Render("  ✗ "+issue.Message) + "\n")
+		} else {
+			sb.WriteString(styles.SubtitleStyle.Render("  ⚠ "+issue.Message) + "\n")
+		}
+	}
+	if scaffold.HasBlocking(m.issues) {
+		sb.WriteString(styles.DimStyle.Render("    Fix the issues above to continue.") + "\n")
+	}
+	return sb.String() + "\n"
+}
+
 type recapRow struct {
 	section RecapSection
 	label   string
@@ -241,27 +296,30 @@ func (m RecapModel) packagesValue() string {
 }
 
 func (m RecapModel) gitValue() string {
-	if !m.gitCfg.InitLocal && m.gitCfg.RemoteHost == "" {
-		return "none"
-	}
 	var parts []string
 	if m.gitCfg.InitLocal || m.gitCfg.HasExistingGit {
 		parts = append(parts, "local")
 	}
-	if m.gitCfg.UniversalGitignore {
-		parts = append(parts, "universal gitignore")
-	}
-	if m.gitCfg.InitialCommit {
-		parts = append(parts, "initial commit")
+	// NOTE: gitignore and initial commit only apply to a new repository.
+	if m.gitCfg.InitLocal && !m.gitCfg.HasExistingGit {
+		if m.gitCfg.UniversalGitignore {
+			parts = append(parts, "universal gitignore")
+		}
+		if m.gitCfg.InitialCommit {
+			parts = append(parts, "initial commit")
+		}
 	}
 	switch m.gitCfg.RemoteHost {
 	case "github":
 		v := "github"
+		visibility := "public"
 		if m.gitCfg.RemotePrivate {
-			v += " (private)"
-		} else {
-			v += " (public)"
+			visibility = "private"
 		}
+		if m.gitCfg.RemoteHTTPS {
+			visibility += ", https"
+		}
+		v += " (" + visibility + ")"
 		if m.gitCfg.RepoName != "" {
 			v += ": " + m.gitCfg.RepoName
 		}

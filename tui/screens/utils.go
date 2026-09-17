@@ -67,6 +67,16 @@ var dangerousRules = []dangerousRule{
 	{regexp.MustCompile(`(?i)(^|/)\.git/?$`), "Inside .git? That would corrupt the repository."},
 }
 
+// windowsDangerousRules protect Windows system locations. They are matched
+// against the raw input too, since filepath.Abs does not understand drive
+// letters on other platforms.
+var windowsDangerousRules = []dangerousRule{
+	{regexp.MustCompile(`(?i)^[a-z]:[\\/]?$`), "Nope. Not the root of a drive."},
+	{regexp.MustCompile(`(?i)^[a-z]:[\\/]windows([\\/].*)?$`), "That's the Windows system directory. Pick somewhere else."},
+	{regexp.MustCompile(`(?i)^[a-z]:[\\/]program files( \(x86\))?([\\/].*)?$`), "Program Files is managed by installers. Pick somewhere else."},
+	{regexp.MustCompile(`(?i)^[a-z]:[\\/]programdata([\\/].*)?$`), "ProgramData is for system-wide app data. Not here."},
+}
+
 // dangerousSegments lists path segments that make a path unsafe regardless of
 // where they appear — e.g. inside /home/user/node_modules/myapp.
 var dangerousSegments = []struct {
@@ -128,6 +138,12 @@ func isDangerous(input string) string {
 
 	for _, rule := range dangerousRules {
 		if rule.re.MatchString(expanded) {
+			return rule.msg
+		}
+	}
+
+	for _, rule := range windowsDangerousRules {
+		if rule.re.MatchString(trimmed) || rule.re.MatchString(expanded) {
 			return rule.msg
 		}
 	}

@@ -34,6 +34,9 @@ func TestIsNewer(t *testing.T) {
 		{"v1.0.0", "v1.0.0", false},
 		{"v1.0.1", "v1.0.0", false},
 		{"v2.0.0", "v1.9.9", false},
+		{"v1.2.0-beta.1", "v1.2.0", true},
+		{"v1.2.0-beta.1", "v1.2.0-beta.2", true},
+		{"v1.2.0", "v1.2.0-beta.2", false},
 	}
 	for _, c := range cases {
 		got := isNewer(c.current, c.latest)
@@ -47,8 +50,26 @@ func TestCurrentVersion(t *testing.T) {
 	if CurrentVersion == "" {
 		t.Error("CurrentVersion should not be empty")
 	}
-	if CurrentVersion[0] != 'v' {
-		t.Errorf("CurrentVersion = %q: expected v prefix", CurrentVersion)
+}
+
+func TestResolveVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		injected string
+		build    string
+		want     string
+	}{
+		{name: "release build uses injected version", injected: "v1.3.0", build: "(devel)", want: "v1.3.0"},
+		{name: "go install uses module version", build: "v1.2.0", want: "v1.2.0"},
+		{name: "local build without vcs", build: "(devel)", want: "dev"},
+		{name: "no build info", want: "dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveVersion(tt.injected, tt.build); got != tt.want {
+				t.Errorf("resolveVersion(%q, %q) = %q, want %q", tt.injected, tt.build, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -134,7 +155,28 @@ func TestCheckLatestVersion_SetsCorrectHeaders(t *testing.T) {
 	}
 }
 
+func withCurrentVersion(t *testing.T, v string) {
+	t.Helper()
+	orig := CurrentVersion
+	CurrentVersion = v
+	t.Cleanup(func() { CurrentVersion = orig })
+}
+
+func TestCheck_DevBuildNeverReportsUpdates(t *testing.T) {
+	withCurrentVersion(t, "dev")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(Release{TagName: "v999.0.0"})
+	}))
+	defer ts.Close()
+	redirectTo(t, ts)
+
+	if info := <-Check(context.Background()); info.Available {
+		t.Error("a dev build should not advertise updates")
+	}
+}
+
 func TestCheck_UpdateAvailable(t *testing.T) {
+	withCurrentVersion(t, "v1.0.0")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(Release{TagName: "v999.0.0"})
 	}))
