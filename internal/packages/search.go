@@ -232,16 +232,27 @@ func fetchNpmSummary(ctx context.Context, client *http.Client, pkg *Package) {
 // response is tiny compared to the full package document.
 func fetchPackagistSummary(ctx context.Context, client *http.Client, pkg *Package) {
 	found, err := searchPackagist(ctx, client, pkg.Name, 5)
-	if err != nil {
-		return
-	}
-	for _, r := range found {
-		if strings.EqualFold(r.Name, pkg.Name) {
-			summary := r.toPackage()
-			summary.Name = pkg.Name
-			*pkg = summary
-			return
+	if err == nil {
+		for _, r := range found {
+			if strings.EqualFold(r.Name, pkg.Name) {
+				summary := r.toPackage()
+				summary.Name = pkg.Name
+				*pkg = summary
+				return
+			}
 		}
+	}
+
+	// NOTE: contrib modules from drupal.org and free plugins mirrored by
+	// wpackagist are not indexed by Packagist itself — they live on their own
+	// composer repositories — so the search above finds nothing for them even
+	// though `composer require` resolves them fine. Ask the upstream registry
+	// directly instead.
+	switch {
+	case strings.HasPrefix(pkg.Name, "drupal/"):
+		fetchDrupalOrgSummary(ctx, client, pkg)
+	case strings.HasPrefix(pkg.Name, "wpackagist-plugin/"):
+		fetchWordPressOrgSummary(ctx, client, pkg)
 	}
 }
 
