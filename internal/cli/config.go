@@ -11,8 +11,8 @@ import (
 
 func HandleConfig(args []string) {
 	if len(args) == 0 {
-		printConfigHelp()
-		os.Exit(1)
+		listConfig()
+		return
 	}
 
 	key := args[0]
@@ -44,12 +44,12 @@ func HandleConfig(args []string) {
 	case "github.token":
 		apply = func(cfg *config.Config) { cfg.GithubToken = value }
 	case "package.manager":
-		pm := packagemanager.Parse(value)
-		if pm == packagemanager.None {
-			fmt.Fprintf(os.Stderr, "Invalid package manager %q. Valid values: npm, pnpm, yarn, bun\n", value)
+		pmValue, ok := resolvePackageManagerValue(value)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Invalid package manager %q. Valid values: npm, pnpm, yarn, bun, none\n", value)
 			os.Exit(1)
 		}
-		apply = func(cfg *config.Config) { cfg.PackageManager = pm.String() }
+		apply = func(cfg *config.Config) { cfg.PackageManager = pmValue }
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown configuration key: %s\n", key)
 		os.Exit(1)
@@ -75,21 +75,57 @@ func handleConfigGet(key string) {
 
 	switch key {
 	case "github.token":
-		if cfg.GithubToken == "" {
-			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + styles.DimStyle.Render("(not set)"))
-		} else {
-			fmt.Println(styles.MutedStyle.Render("  github.token") + "  " + MaskToken(cfg.GithubToken))
-		}
+		printConfigValue(key, githubTokenDisplay(cfg.GithubToken))
 	case "package.manager":
-		if cfg.PackageManager == "" {
-			fmt.Println(styles.MutedStyle.Render("  package.manager") + "  " + styles.DimStyle.Render("(not set)"))
-		} else {
-			fmt.Println(styles.MutedStyle.Render("  package.manager") + "  " + cfg.PackageManager)
-		}
+		printConfigValue(key, packageManagerDisplay(cfg.PackageManager))
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown configuration key: %s\n", key)
 		os.Exit(1)
 	}
+}
+
+// listConfig prints every known configuration key with its current value,
+// for `kapi config` run with no arguments.
+func listConfig() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	printConfigValue("github.token", githubTokenDisplay(cfg.GithubToken))
+	printConfigValue("package.manager", packageManagerDisplay(cfg.PackageManager))
+}
+
+func printConfigValue(key, value string) {
+	fmt.Println(styles.MutedStyle.Render("  "+key) + "  " + value)
+}
+
+func githubTokenDisplay(tok string) string {
+	if tok == "" {
+		return styles.DimStyle.Render("(not set)")
+	}
+	return MaskToken(tok)
+}
+
+func packageManagerDisplay(pm string) string {
+	if pm == "" {
+		return styles.DimStyle.Render("(not set)")
+	}
+	return pm
+}
+
+// resolvePackageManagerValue turns a `kapi config package.manager <value>`
+// argument into the string to store. An empty value or "none" clears the
+// saved preference instead of being rejected as invalid.
+func resolvePackageManagerValue(value string) (resolved string, ok bool) {
+	if value == "" || value == "none" {
+		return "", true
+	}
+	pm := packagemanager.Parse(value)
+	if pm == packagemanager.None {
+		return "", false
+	}
+	return pm.String(), true
 }
 
 // MaskToken hides a secret while keeping enough of it to recognise it.
@@ -105,6 +141,7 @@ func MaskToken(tok string) string {
 func printConfigHelp() {
 	PrintLogoAndTitle("Configuration")
 	fmt.Println("  " + styles.MutedStyle.Render("Usage:"))
+	fmt.Println("    " + styles.SelectedStyle.Render("kapi config") + "                 List every configuration value")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <key>") + "          Read a configuration value")
 	fmt.Println("    " + styles.SelectedStyle.Render("kapi config <key> <value>") + "  Set a configuration value")
 	fmt.Println()
@@ -149,7 +186,7 @@ func printKeyHelp(key string) {
 		fmt.Println("  Sets the default JS package manager used when scaffolding new projects.")
 		fmt.Println("  You can still override it per-project during the wizard.")
 		fmt.Println()
-		fmt.Println(styles.MutedStyle.Render("  Valid values:") + "  npm   pnpm   yarn   bun")
+		fmt.Println(styles.MutedStyle.Render("  Valid values:") + "  npm   pnpm   yarn   bun   " + styles.DimStyle.Render("(or empty/\"none\" to clear)"))
 		fmt.Println()
 		fmt.Println(styles.MutedStyle.Render("  Usage:"))
 		fmt.Println("    kapi config package.manager " + styles.DimStyle.Render("pnpm"))
