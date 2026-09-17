@@ -229,9 +229,12 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			StreamFn: streamCmd(parent, "composer", "create-project", "laminas/laminas-mvc-skeleton", name),
 		}}
 	case "phalcon":
+		// NOTE: phalcon/phalcon is the framework library, not installable as a
+		// project skeleton; Phalcon has no blank starter, so invo (their own
+		// getting-started tutorial app) is the closest official entry point.
 		return []Step{{
-			Label:    "composer create-project phalcon/phalcon " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "phalcon/phalcon", name),
+			Label:    "composer create-project phalcon/invo " + name,
+			StreamFn: streamCmd(parent, "composer", "create-project", "phalcon/invo", name),
 		}}
 	case "fuelphp":
 		return []Step{{
@@ -239,9 +242,11 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			StreamFn: streamCmd(parent, "composer", "create-project", "fuel/fuel", name),
 		}}
 	case "leafphp":
+		// NOTE: leafs/leaf is the framework library; leafs/mvc is the actual
+		// project skeleton with the MVC structure and routing set up.
 		return []Step{{
-			Label:    "composer create-project leafs/leaf " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "leafs/leaf", name),
+			Label:    "composer create-project leafs/mvc " + name,
+			StreamFn: streamCmd(parent, "composer", "create-project", "leafs/mvc", name),
 		}}
 	case "api-platform":
 		return []Step{{

@@ -863,3 +863,23 @@ func TestStopRunningCommands(t *testing.T) {
 		t.Errorf("%d commands still tracked after they exited", len(running.procs))
 	}
 }
+
+func TestFrameworkSteps_PHPProjectSkeletons(t *testing.T) {
+	// phalcon/phalcon and leafs/leaf are libraries, not composer create-project
+	// starters; they must not appear as the scaffolded package.
+	tests := []struct {
+		id        string
+		wantLabel string
+	}{
+		{id: "phalcon", wantLabel: "composer create-project phalcon/invo app"},
+		{id: "leafphp", wantLabel: "composer create-project leafs/mvc app"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			steps := frameworkSteps("/tmp/x/app", fw(tt.id), packagemanager.None)
+			if len(steps) != 1 || steps[0].Label != tt.wantLabel {
+				t.Errorf("steps = %v, want [%q]", stepLabels(steps), tt.wantLabel)
+			}
+		})
+	}
+}
