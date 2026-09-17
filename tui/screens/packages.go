@@ -325,6 +325,19 @@ func (m PackagesModel) Init() tea.Cmd {
 	return tea.Batch(loadDefaultsCmd(m.framework.ID, m.isPhp), loadFavoritesCmd(m.framework.ID))
 }
 
+// packageDescription returns the description to show in the detail panel,
+// or an explanatory placeholder when it is empty. Some packages (e.g. Drupal
+// contrib modules and WordPress plugins from wpackagist) are not indexed by
+// Packagist itself — they live on their own composer repositories — so kapi
+// has no description or stats to show for them even though `composer
+// require` resolves them fine.
+func packageDescription(description string) string {
+	if description != "" {
+		return description
+	}
+	return "No description available."
+}
+
 func (m PackagesModel) currentPackage() (packages.Package, bool) {
 	if len(m.results) == 0 || m.cursor >= len(m.results) {
 		return packages.Package{}, false
@@ -1348,7 +1361,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 			pkg := m.findPackageByName(entry.Name)
 			if pkg != nil {
 				sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")
-				sb.WriteString(styles.DimStyle.Render(pkg.Description) + "\n")
+				sb.WriteString(styles.DimStyle.Render(packageDescription(pkg.Description)) + "\n")
 				sb.WriteString("\n")
 				sb.WriteString(styles.MutedStyle.Render("Version  ") + styles.SelectedStyle.Render(entry.Version) + styles.MutedStyle.Render("  🔒") + "\n")
 				if entry.Note != "" {
@@ -1418,7 +1431,7 @@ func (m PackagesModel) renderDetail(panelWidth int) string {
 	pkg, ok := m.currentPackage()
 	if ok {
 		sb.WriteString(styles.TitleStyle.Render(pkg.Name) + "\n")
-		sb.WriteString(styles.DimStyle.Render(pkg.Description) + "\n")
+		sb.WriteString(styles.DimStyle.Render(packageDescription(pkg.Description)) + "\n")
 		sb.WriteString("\n")
 		displayVersion := ""
 		fd, isFrozen := m.freezeData[pkg.Name]
