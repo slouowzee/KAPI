@@ -883,3 +883,17 @@ func TestFrameworkSteps_PHPProjectSkeletons(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameworkSteps_ApiPlatform_UsesSymfonySkeletonAndPack(t *testing.T) {
+	// api-platform/api-platform is abandoned in favor of api-platform/api-pack,
+	// which is a Symfony Flex pack meant to be required into a skeleton, not
+	// created standalone.
+	steps := frameworkSteps("/tmp/x/app", fw("api-platform"), packagemanager.None)
+	want := []string{
+		"composer create-project symfony/skeleton app",
+		"composer require api-platform/api-pack",
+	}
+	if !slices.Equal(stepLabels(steps), want) {
+		t.Errorf("steps = %v, want %v", stepLabels(steps), want)
+	}
+}

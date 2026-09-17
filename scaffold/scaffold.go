@@ -249,10 +249,7 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			StreamFn: streamCmd(parent, "composer", "create-project", "leafs/mvc", name),
 		}}
 	case "api-platform":
-		return []Step{{
-			Label:    "composer create-project api-platform/api-platform " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "api-platform/api-platform", name),
-		}}
+		return apiPlatformSteps(targetDir, name, parent)
 	case "vanilla-php":
 		return vanillaPhpSteps(targetDir, name)
 
@@ -356,6 +353,22 @@ func wordpressSteps(name, parent string) []Step {
 func vanillaPhpComposerName(folder string) string {
 	part := composerPackageName(folder)
 	return part + "/" + part
+}
+
+// apiPlatformSteps installs API Platform as a Symfony pack: api-platform/api-platform
+// (the old standalone distribution) is abandoned in favor of requiring the pack
+// into a fresh Symfony skeleton.
+func apiPlatformSteps(targetDir, name, parent string) []Step {
+	return []Step{
+		{
+			Label:    "composer create-project symfony/skeleton " + name,
+			StreamFn: streamCmd(parent, "composer", "create-project", "symfony/skeleton", name),
+		},
+		{
+			Label:    "composer require api-platform/api-pack",
+			StreamFn: streamCmd(targetDir, "composer", "require", "api-platform/api-pack"),
+		},
+	}
 }
 
 func vanillaPhpSteps(targetDir, name string) []Step {
