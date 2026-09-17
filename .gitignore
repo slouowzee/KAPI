@@ -33,3 +33,11 @@ kapi
 
 goreleaser
 schema.json
+
+# Graphify
+graphify-out/
+.graphifyignore
+
+# Claude
+.claude
+CLAUDE.md
