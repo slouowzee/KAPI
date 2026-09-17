@@ -97,9 +97,9 @@ func (m GitConfigModel) handleRemoteNameInput(msg tea.KeyMsg) (GitConfigModel, t
 	case "enter":
 		name := strings.TrimSpace(m.remoteRepoName)
 		if name != "" {
-			m.step = GITCFG_STEP_EXECUTING
-			m.execMsg = "Creating GitHub repository..."
-			return m, execGithubCreateRepoCmd(name, m.remoteIsPrivate, m.dir)
+			m.remoteRepoName = name
+			m.remoteProtocolCursor = 0
+			m.step = GITCFG_STEP_REMOTE_PROTOCOL
 		}
 	case "left":
 		if m.remoteNamePos > 0 {
@@ -123,6 +123,26 @@ func (m GitConfigModel) handleRemoteNameInput(msg tea.KeyMsg) (GitConfigModel, t
 			m.remoteRepoName = string(append(runes[:m.remoteNamePos], append(msg.Runes, runes[m.remoteNamePos:]...)...))
 			m.remoteNamePos += len(msg.Runes)
 		}
+	}
+	return m, nil
+}
+
+// handleRemoteProtocol lets the user pick SSH or HTTPS for the new GitHub
+// remote before it is created.
+func (m GitConfigModel) handleRemoteProtocol(msg tea.KeyMsg) (GitConfigModel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.clearMsg()
+		m.step = GITCFG_STEP_REMOTE_NAME_INPUT
+	case "left", "up", "h", "k":
+		m.remoteProtocolCursor = 0
+	case "right", "down", "l", "j":
+		m.remoteProtocolCursor = 1
+	case "enter":
+		m.remoteHTTPS = m.remoteProtocolCursor == 1
+		m.step = GITCFG_STEP_EXECUTING
+		m.execMsg = "Creating GitHub repository..."
+		return m, execGithubCreateRepoCmd(m.remoteRepoName, m.remoteIsPrivate, m.remoteHTTPS, m.dir)
 	}
 	return m, nil
 }

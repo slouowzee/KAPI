@@ -26,6 +26,9 @@ type GitConfigModel struct {
 	remoteNamePos    int
 	remoteIsPrivate  bool
 
+	remoteProtocolCursor int
+	remoteHTTPS          bool
+
 	collabDetecting bool
 	collabState     collabState
 	collabQuestions []collabQuestion
@@ -242,6 +245,8 @@ func (m GitConfigModel) Update(msg tea.Msg) (GitConfigModel, tea.Cmd) {
 			return m.handleRemoteMenu(msg)
 		case GITCFG_STEP_REMOTE_NAME_INPUT:
 			return m.handleRemoteNameInput(msg)
+		case GITCFG_STEP_REMOTE_PROTOCOL:
+			return m.handleRemoteProtocol(msg)
 		case GITCFG_STEP_REMOTE_INPUT:
 			return m.handleURLInput(msg)
 		case GITCFG_STEP_CONFIRM_CI:

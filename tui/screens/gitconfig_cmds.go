@@ -241,7 +241,7 @@ func execGitKeyDeleteCmd(format, key string) tea.Cmd {
 	}
 }
 
-func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
+func execGithubCreateRepoCmd(name string, private, https bool, dir string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -249,24 +249,27 @@ func execGithubCreateRepoCmd(name string, private bool, dir string) tea.Cmd {
 		if err != nil {
 			return gitcfgExecMsg{err: err}
 		}
-		sshUrl := repo.SSHURL
+		remoteURL := repo.SSHURL
+		if https {
+			remoteURL = repo.CloneURL
+		}
 
 		chk := exec.Command("git", "remote", "get-url", "origin")
 		chk.Dir = dir
 		if err := chk.Run(); err == nil {
-			cmd := exec.Command("git", "remote", "set-url", "origin", sshUrl)
+			cmd := exec.Command("git", "remote", "set-url", "origin", remoteURL)
 			cmd.Dir = dir
 			if err := cmd.Run(); err != nil {
 				return gitcfgExecMsg{err: fmt.Errorf("repo created but failed to set remote: %w", err)}
 			}
-			return gitcfgExecMsg{newRemoteURL: sshUrl, successMsg: "GitHub repo created and remote updated successfully."}
+			return gitcfgExecMsg{newRemoteURL: remoteURL, successMsg: "GitHub repo created and remote updated successfully."}
 		}
-		cmd := exec.Command("git", "remote", "add", "origin", sshUrl)
+		cmd := exec.Command("git", "remote", "add", "origin", remoteURL)
 		cmd.Dir = dir
 		if err := cmd.Run(); err != nil {
 			return gitcfgExecMsg{err: fmt.Errorf("repo created but failed to add remote: %w", err)}
 		}
-		return gitcfgExecMsg{newRemoteURL: sshUrl, successMsg: "GitHub repo created and remote added successfully."}
+		return gitcfgExecMsg{newRemoteURL: remoteURL, successMsg: "GitHub repo created and remote added successfully."}
 	}
 }
 
