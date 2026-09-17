@@ -104,6 +104,33 @@ func preflight(ctx context.Context, env preflightEnv, targetDir string, fw regis
 	return issues
 }
 
+// InstallPreflight checks the tools needed to add packages to an existing
+// project.
+func InstallPreflight(fw registry.Framework, pm packagemanager.PM) []Issue {
+	return installPreflight(defaultPreflightEnv, fw, pm)
+}
+
+func installPreflight(env preflightEnv, fw registry.Framework, pm packagemanager.PM) []Issue {
+	tools := []string{"php", "composer"}
+	if fw.Ecosystem == "js" {
+		if pm == packagemanager.None {
+			pm = packagemanager.NPM
+		}
+		tools = []string{pm.InstallArgs()[0]}
+		if pm != packagemanager.Bun {
+			tools = append([]string{"node"}, tools...)
+		}
+	}
+
+	var issues []Issue
+	for _, tool := range tools {
+		if _, err := env.lookPath(tool); err != nil {
+			issues = append(issues, Issue{Blocking: true, Message: fmt.Sprintf("%s is not installed or not in PATH", tool)})
+		}
+	}
+	return issues
+}
+
 // scopeCheckTimeout bounds the GitHub call so an offline machine does not
 // keep the summary waiting. It is a variable so tests can shorten it.
 var scopeCheckTimeout = 4 * time.Second

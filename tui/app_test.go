@@ -11,6 +11,7 @@ import (
 	"github.com/slouowzee/kapi/internal/packagemanager"
 	"github.com/slouowzee/kapi/internal/packages"
 	"github.com/slouowzee/kapi/internal/registry"
+	"github.com/slouowzee/kapi/scaffold"
 	"github.com/slouowzee/kapi/tui/screens"
 )
 
@@ -66,6 +67,7 @@ func TestBrowse_MixedProjectAsksForEcosystem(t *testing.T) {
 
 func TestBrowse_InstallCartIntoCurrentProject(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	withInstallPreflight(t, nil)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "pnpm-lock.yaml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
@@ -112,5 +114,30 @@ func TestBrowse_UsesDetectedFramework(t *testing.T) {
 				t.Errorf("framework = %q, want %q", a.selectedFramework.ID, tt.wantID)
 			}
 		})
+	}
+}
+
+func withInstallPreflight(t *testing.T, issues []scaffold.Issue) {
+	t.Helper()
+	orig := installPreflight
+	installPreflight = func(registry.Framework, packagemanager.PM) []scaffold.Issue { return issues }
+	t.Cleanup(func() { installPreflight = orig })
+}
+
+func TestBrowse_MissingPackageManagerBlocksInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	withInstallPreflight(t, []scaffold.Issue{{Blocking: true, Message: "pnpm is not installed or not in PATH"}})
+	dir := t.TempDir()
+
+	a := App{browseMode: true, selectedDir: dir}
+	a, _ = a.startBrowse(ecosystem.ECOSYSTEM_JS)
+	a.packages = screens.NewPackagesFromCart(120, 40, a.selectedFramework, dir, []packages.Package{{Name: "zod"}})
+	a, _ = a.installBrowsedPackages()
+
+	if a.screen != ScreenPackages {
+		t.Fatalf("screen = %v, want to stay on the packages screen", a.screen)
+	}
+	if view := a.packages.View(); !strings.Contains(view, "pnpm is not installed") {
+		t.Error("the missing tool should be reported on the packages screen")
 	}
 }

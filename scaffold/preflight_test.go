@@ -202,3 +202,29 @@ func TestPreflight_ScopeCheckTimesOut(t *testing.T) {
 		t.Errorf("issues = %+v, want a single non-blocking warning", issues)
 	}
 }
+
+func TestInstallPreflight(t *testing.T) {
+	tests := []struct {
+		name      string
+		fw        registry.Framework
+		pm        packagemanager.PM
+		installed []string
+		want      []string
+	}{
+		{name: "composer project ready", fw: fw("laravel"), installed: []string{"php", "composer"}},
+		{name: "composer missing", fw: fw("laravel"), installed: []string{"php"}, want: []string{"composer is not installed"}},
+		{name: "pnpm missing", fw: jsfw("nextjs"), pm: packagemanager.PNPM, installed: []string{"node"}, want: []string{"pnpm is not installed"}},
+		{name: "bun needs no node", fw: jsfw("nextjs"), pm: packagemanager.Bun, installed: []string{"bun"}},
+		{name: "default npm needs node", fw: jsfw("nextjs"), installed: []string{"npm"}, want: []string{"node is not installed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := fakePreflightEnv(tt.installed, nil, "", config.TokenScopes{}, nil)
+			var got []string
+			for _, issue := range installPreflight(env, tt.fw, tt.pm) {
+				got = append(got, issue.Message)
+			}
+			assertIssues(t, "blocking", got, tt.want)
+		})
+	}
+}

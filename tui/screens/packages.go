@@ -263,6 +263,12 @@ func (m *PackagesModel) SetSize(width, height int) {
 	m.height = height
 }
 
+// WithStatus shows a message under the key hints.
+func (m PackagesModel) WithStatus(status string) PackagesModel {
+	m.freezeStatus = status
+	return m
+}
+
 // WithConfirmLabel changes the action shown for the enter key.
 func (m PackagesModel) WithConfirmLabel(label string) PackagesModel {
 	m.confirmLabel = label

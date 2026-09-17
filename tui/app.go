@@ -593,11 +593,18 @@ func (a App) installBrowsedPackages() (App, tea.Cmd) {
 	if pm == packagemanager.None {
 		pm = a.defaultPM
 	}
+	if issues := installPreflight(a.selectedFramework, pm); scaffold.HasBlocking(issues) {
+		a.packages = a.packages.WithStatus("Cannot install: " + issues[0].Message)
+		return a, nil
+	}
 	steps := scaffold.InstallPlan(a.selectedDir, a.selectedFramework, cart, pm)
 	a.screen = ScreenExec
 	a.exec = screens.NewInstallExec(a.width, a.height, toExecSteps(steps))
 	return a, a.exec.Init()
 }
+
+// installPreflight is a variable so tests do not depend on the machine's tools.
+var installPreflight = scaffold.InstallPreflight
 
 func toExecSteps(steps []scaffold.Step) []screens.ExecStep {
 	execSteps := make([]screens.ExecStep, len(steps))
