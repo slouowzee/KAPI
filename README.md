@@ -80,6 +80,38 @@ kapi config package.manager "bun"
 kapi config github.token
 ```
 
+The GitHub token and the default package manager can also be changed from the **Settings** screen. A `GITHUB_TOKEN` environment variable takes precedence over the saved token.
+
+### Freezing package versions
+
+Pin a package to a version so KAPI installs it every time you pick it:
+
+```bash
+# Choose the version interactively
+kapi freeze zod
+
+# Or give it directly
+kapi freeze laravel/framework@11.0.0
+
+# List frozen packages / unfreeze one
+kapi freeze
+kapi unfreeze zod
+```
+
+### Shell integration
+
+KAPI can `cd` into the project it just created. The install script sets this up for you; with Homebrew, Scoop or AUR, add it to your shell configuration:
+
+```bash
+# bash / zsh (~/.bashrc or ~/.zshrc)
+eval "$(kapi shell-init zsh)"
+
+# fish (~/.config/fish/config.fish)
+kapi shell-init fish | source
+```
+
+For Nushell and PowerShell, run `kapi shell-init --help`.
+
 
 ---
 
