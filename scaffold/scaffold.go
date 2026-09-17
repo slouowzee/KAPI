@@ -196,11 +196,6 @@ func frameworkSteps(targetDir string, fw registry.Framework, pm packagemanager.P
 			Label:    "composer create-project slim/slim-skeleton " + name,
 			StreamFn: streamCmd(parent, "composer", "create-project", "slim/slim-skeleton", name),
 		}}
-	case "lumen":
-		return []Step{{
-			Label:    "composer create-project laravel/lumen " + name,
-			StreamFn: streamCmd(parent, "composer", "create-project", "laravel/lumen", name),
-		}}
 	case "codeigniter":
 		return []Step{{
 			Label:    "composer create-project codeigniter4/appstarter " + name,
@@ -812,7 +807,7 @@ jobs:
       - run: composer install --prefer-dist --no-progress
 `
 	switch fwID {
-	case "laravel", "lumen":
+	case "laravel":
 		return header +
 			"      - run: cp .env.example .env\n" +
 			"      - run: php artisan key:generate\n" +
@@ -884,7 +879,7 @@ test:
     - composer install --prefer-dist --no-progress
 `
 	switch fwID {
-	case "laravel", "lumen":
+	case "laravel":
 		return header +
 			"    - cp .env.example .env\n" +
 			"    - php artisan key:generate\n" +

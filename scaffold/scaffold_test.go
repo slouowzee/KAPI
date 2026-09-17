@@ -208,16 +208,6 @@ func TestGithubActionsCI_Laravel_HasEnvCopyAndKeyGenerate(t *testing.T) {
 	}
 }
 
-func TestGithubActionsCI_Lumen_HasEnvCopyAndKeyGenerate(t *testing.T) {
-	out := githubActionsCI(fw("lumen"), packagemanager.NPM)
-	if !strings.Contains(out, "cp .env.example .env") {
-		t.Error("lumen CI should contain 'cp .env.example .env'")
-	}
-	if !strings.Contains(out, "php artisan key:generate") {
-		t.Error("lumen CI should contain 'php artisan key:generate'")
-	}
-}
-
 func TestGithubActionsCI_Symfony_NoEnvCopy(t *testing.T) {
 	out := githubActionsCI(fw("symfony"), packagemanager.NPM)
 	if strings.Contains(out, ".env.example") {

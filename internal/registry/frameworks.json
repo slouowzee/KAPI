@@ -31,16 +31,6 @@
       "github_repo": "slimphp/Slim"
     },
     {
-      "id": "lumen",
-      "detect": ["laravel/lumen-framework"],
-      "name": "Lumen",
-      "ecosystem": "php",
-      "description": "The stunningly fast micro-framework by Laravel",
-      "tags": ["micro", "api", "rest", "laravel"],
-      "packagist_package": "laravel/lumen",
-      "github_repo": "laravel/lumen"
-    },
-    {
       "id": "codeigniter",
       "detect": ["codeigniter4/framework"],
       "name": "CodeIgniter",
