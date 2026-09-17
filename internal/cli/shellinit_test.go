@@ -54,15 +54,24 @@ func TestShellInitScript(t *testing.T) {
 	}
 }
 
-func TestShellInitScript_MatchesInstallScript(t *testing.T) {
+// TestInstallScript_GeneratesIntegrationFromBinary guards against
+// re-introducing a hardcoded copy of the shell integration text in
+// install.sh: it must call `kapi shell-init` on the freshly installed
+// binary instead, so the two can never drift apart again.
+func TestInstallScript_GeneratesIntegrationFromBinary(t *testing.T) {
 	install, err := os.ReadFile(filepath.Join("..", "..", "install.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	content := string(install)
+
+	if !strings.Contains(content, `shell-init`) {
+		t.Error("install.sh should call `kapi shell-init` to generate the integration snippet")
+	}
 	for _, shell := range []string{"zsh", "fish", "nu"} {
 		script, _ := shellInitScript(shell)
-		if !strings.Contains(string(install), strings.TrimSuffix(script, "\n")) {
-			t.Errorf("%s integration differs from install.sh", shell)
+		if strings.Contains(content, strings.TrimSuffix(script, "\n")) {
+			t.Errorf("install.sh embeds a hardcoded copy of the %s integration instead of generating it", shell)
 		}
 	}
 }
