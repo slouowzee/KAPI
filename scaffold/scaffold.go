@@ -109,8 +109,8 @@ func remoteSteps(targetDir string, gitCfg gitconfig.GitConfig) []Step {
 	// NOTE: a freshly initialised repository without a commit has nothing to
 	// push, so the remote is only registered.
 	hasCommit := gitCfg.InitialCommit || gitCfg.HasExistingGit
-	switch gitCfg.RemoteHost {
-	case "github":
+	switch {
+	case gitCfg.CreatesGithubRepo():
 		name := gitCfg.RepoName
 		if name == "" {
 			name = filepath.Base(targetDir)

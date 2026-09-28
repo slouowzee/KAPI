@@ -20,3 +20,10 @@ type GitConfig struct {
 	Collab      bool
 	CI          string
 }
+
+// CreatesGithubRepo reports whether a new GitHub repository must be created.
+// RemoteHost is also inferred from a user-supplied URL, so it alone cannot
+// tell "create" from "use this existing remote".
+func (c GitConfig) CreatesGithubRepo() bool {
+	return c.RemoteHost == "github" && c.RemoteURL == "" && !c.HasExistingRemote
+}
