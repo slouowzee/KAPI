@@ -123,6 +123,21 @@ func TestRemoteSteps_ExistingURL_ContainsURL(t *testing.T) {
 	}
 }
 
+// A GitHub URL typed by the user must be added as origin, not turned into a
+// brand-new repository.
+func TestRemoteSteps_ExistingGithubURL_DoesNotCreateRepo(t *testing.T) {
+	const url = "git@github.com:me/app.git"
+	cfg := gitconfig.GitConfig{RemoteHost: "github", RemoteURL: url, InitialCommit: true}
+	steps := remoteSteps("/tmp/proj", cfg)
+
+	if hasLabel(steps, "create ") {
+		t.Errorf("must not create a GitHub repo for an existing URL, got %v", stepLabels(steps))
+	}
+	if len(steps) != 2 || !strings.Contains(steps[0].Label, url) {
+		t.Errorf("want [remote add %s, push], got %v", url, stepLabels(steps))
+	}
+}
+
 func TestRemoteSteps_NoRemote_ReturnsNil(t *testing.T) {
 	cfg := gitconfig.GitConfig{RemoteHost: "", RemoteURL: ""}
 	steps := remoteSteps("/tmp/proj", cfg)

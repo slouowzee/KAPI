@@ -309,8 +309,8 @@ func (m RecapModel) gitValue() string {
 			parts = append(parts, "initial commit")
 		}
 	}
-	switch m.gitCfg.RemoteHost {
-	case "github":
+	switch {
+	case m.gitCfg.CreatesGithubRepo():
 		v := "github"
 		visibility := "public"
 		if m.gitCfg.RemotePrivate {
@@ -324,11 +324,8 @@ func (m RecapModel) gitValue() string {
 			v += ": " + m.gitCfg.RepoName
 		}
 		parts = append(parts, v)
-	case "":
-	default:
-		if m.gitCfg.RemoteURL != "" {
-			parts = append(parts, filepath.Base(m.gitCfg.RemoteURL))
-		}
+	case m.gitCfg.RemoteURL != "":
+		parts = append(parts, filepath.Base(m.gitCfg.RemoteURL))
 	}
 	if m.gitCfg.Collab {
 		parts = append(parts, "collab")

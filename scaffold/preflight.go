@@ -91,7 +91,7 @@ func preflight(ctx context.Context, env preflightEnv, targetDir string, fw regis
 	}
 
 	hasRepo := newRepo || gitCfg.HasExistingGit
-	if hasRepo && gitCfg.RemoteHost == "github" && !gitCfg.HasExistingRemote {
+	if hasRepo && gitCfg.CreatesGithubRepo() {
 		if env.token() == "" {
 			blocking("a GitHub token is required to create the repository: kapi config github.token <token>")
 		} else if scopes, err := checkScopes(ctx, env); err != nil {

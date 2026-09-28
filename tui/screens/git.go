@@ -178,7 +178,7 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 		m.commitOpt = gitCommitYes
 	}
 	switch {
-	case cfg.HasExistingGit && cfg.RemoteURL != "":
+	case cfg.RemoteURL != "":
 		m.remoteOpt = gitRemoteExisting
 		m.urlInput = cfg.RemoteURL
 	case cfg.RemoteHost == "github" && cfg.RemoteHTTPS && cfg.RemotePrivate:
@@ -199,9 +199,6 @@ func Git(width, height int, targetDir string, cfg GitConfig) GitModel {
 		m.remoteOpt = gitRemoteGithubPublic
 		m.repoNameInput = cfg.RepoName
 		m.repoNameInputPos = len([]rune(m.repoNameInput))
-	case cfg.RemoteURL != "":
-		m.remoteOpt = gitRemoteExisting
-		m.urlInput = cfg.RemoteURL
 	default:
 		m.remoteOpt = gitRemoteSkip
 	}
